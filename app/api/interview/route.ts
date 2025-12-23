@@ -7,7 +7,10 @@ export async function POST(req: NextRequest) {
         const body = await req.json();
         const { messages, selectedJobId, type, summaries, round = 1, code, currentQuestion } = body;
 
-        const API_KEY = process.env.GEMINI_API_KEY || "AIzaSyA3Ahw6Vu4V5FdLMMEdhuR1VTMDrQsjBTM";
+        const API_KEY = process.env.GEMINI_API_KEY;
+        if (!API_KEY) {
+            return NextResponse.json({ error: 'GEMINI_API_KEY is not configured' }, { status: 500 });
+        }
 
         const selectedJob = interviewData.uber_roles.find((r) => r.id === selectedJobId);
         if (!selectedJob) {
