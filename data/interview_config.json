@@ -1,0 +1,165 @@
+{
+    "uber_roles": [
+        {
+            "id": "intern",
+            "level": "Intern",
+            "title": "Software Engineer Intern - University Ops",
+            "must_have": [
+                "Currently pursuing CS degree",
+                "Proficiency in one: Python, Java, or Go",
+                "Understanding of Data Structures",
+                "Curiosity to learn"
+            ],
+            "nice_to_have": [
+                "Personal projects",
+                "Open source contributions",
+                "Hackathon participation"
+            ],
+            "description": "Jumpstart your career with Uber. Work on production code that impacts millions of riders while being mentored by world-class engineers."
+        },
+        {
+            "id": "sde1",
+            "level": "SDE-1",
+            "title": "Backend Engineer - Fulfillment Core",
+            "must_have": [
+                "Java or Go",
+                "SQL",
+                "Unit Testing (JUnit/Testify)",
+                "REST API Fundamentals"
+            ],
+            "nice_to_have": [
+                "Docker",
+                "Basic Microservices knowledge",
+                "Experience with Redis"
+            ],
+            "description": "Responsible for the reliability of the 'Request a Ride' API. You will focus on writing clean, bug-free code for the matching engine."
+        },
+        {
+            "id": "sde2",
+            "level": "SDE-2",
+            "title": "Software Engineer II - Payments Ledger",
+            "must_have": [
+                "Golang",
+                "Distributed Systems",
+                "Kafka",
+                "Idempotency Design",
+                "MySQL/PostgreSQL"
+            ],
+            "nice_to_have": [
+                "Cassandra",
+                "FinTech experience",
+                "Infrastructure as Code (Terraform)"
+            ],
+            "description": "Scaling the payment gateway to handle 1M+ transactions per second. Ensuring data consistency across distributed ledgers is paramount."
+        },
+        {
+            "id": "sde3",
+            "level": "SDE-3",
+            "title": "Senior Engineer - Marketplace Dynamics",
+            "must_have": [
+                "System Design (High-Scale)",
+                "Go/Java",
+                "Redis/Memcached",
+                "Concurrency Mastery",
+                "Kafka Streams"
+            ],
+            "nice_to_have": [
+                "Machine Learning integration",
+                "Data pipeline optimization",
+                "Python"
+            ],
+            "description": "Owning the surge pricing and driver supply-demand algorithms. You must optimize for p99 latency under extreme load."
+        },
+        {
+            "id": "lead",
+            "level": "Lead Engineer",
+            "title": "Tech Lead - Rider Experience",
+            "must_have": [
+                "Architecture Design",
+                "Stakeholder Management",
+                "Mentorship",
+                "Full-stack awareness",
+                "Project Scoping"
+            ],
+            "nice_to_have": [
+                "React/Native",
+                "Public Cloud (OCI/AWS)",
+                "Budgeting/Resource Planning"
+            ],
+            "description": "Driving the roadmap for the Uber Rider app's global features. You bridge the gap between Product Managers and Engineering execution."
+        },
+        {
+            "id": "staff",
+            "level": "Staff Engineer",
+            "title": "Staff Engineer - Infrastructure & Storage",
+            "must_have": [
+                "C++/Go",
+                "Consensus Algorithms (Raft/Paxos)",
+                "Networking Protocols",
+                "Multi-region Replication"
+            ],
+            "nice_to_have": [
+                "Open Source contributions",
+                "Custom Database internals",
+                "Kernel-level tuning"
+            ],
+            "description": "Architecting the global backbone of Uber's infrastructure. Impacting cross-org initiatives."
+        }
+    ],
+    "question_bank": [
+        {
+            "level": "General Technical",
+            "focus": "Frameworks & Spring Boot",
+            "questions": [
+                {
+                    "category": "Spring Boot",
+                    "text": "What is the purpose of Spring Boot Actuator? How do you use its endpoints to monitor application health at Uber?"
+                },
+                {
+                    "category": "Spring Security",
+                    "text": "Explain Authentication vs Authorization in Spring Security. How would you implement OAuth2 for a secure payment microservice?"
+                },
+                {
+                    "category": "REST Services",
+                    "text": "What are the common HTTP status codes for partial success or duplicate requests? How do you handle idempotency in REST?"
+                }
+            ]
+        },
+        {
+            "level": "Microservices",
+            "focus": "Architecture & Communication",
+            "questions": [
+                {
+                    "category": "Migration",
+                    "text": "What all details will you keep in mind while migrating from a monolithic architecture to microservices for a high-traffic app like Uber?"
+                },
+                {
+                    "category": "Communication",
+                    "text": "How will you design microservices and establish proper communication among them? Explain with design patterns like API Gateway or Broker-based messaging."
+                },
+                {
+                    "category": "Patterns",
+                    "text": "Define the Saga Design Pattern. How does it ensure data consistency across multiple independent services during a distributed transaction?"
+                }
+            ]
+        },
+        {
+            "level": "System Design",
+            "focus": "Case Studies & Scale",
+            "questions": [
+                {
+                    "category": "Case Study",
+                    "text": "How will you design a car rental app like 'Zoom Car'? Focus on vehicle availability tracking and real-time booking."
+                },
+                {
+                    "category": "Read-Heavy Systems",
+                    "text": "For a read-heavy system (e.g., viewing driver reviews), what architectural choices would you make to ensure low latency?"
+                },
+                {
+                    "category": "Fault Tolerance",
+                    "text": "For a critical payment service, what mechanisms should you implement for fault tolerance (e.g., Circuit Breaker, Retries, Dead Letter Queues)?"
+                }
+            ]
+        }
+    ]
+}

@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+:root {
+    --background: #ffffff;
+    --foreground: #000000;
+
+    /* EPAM Primary Branding */
+    --brand-blue: #0095A9;
+    --brand-green: #76bc21;
+    --brand-dark: #222222;
+    --brand-gray: #f8f8f8;
+}
+
+body {
+    color: #000;
+    background: #fff;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+@layer utilities {
+    .text-balance {
+        text-wrap: balance;
+    }
+}
+
+/* Custom Scrollbar for minimalist look */
+::-webkit-scrollbar {
+    width: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #ccc;
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #aaa;
+}
