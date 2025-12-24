@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import interviewData from '@/data/interview_config.json';
+import { LLMRouter } from '@/lib/llm-router';
+
+export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
     try {
         // Read body once at the top
         const body = await req.json();
-        const { messages, selectedJobId, type, summaries, round = 1, code, currentQuestion } = body;
+        const { messages, selectedJobId, type, summaries, round = 1, code, currentQuestion, customSkills } = body;
 
         const API_KEY = process.env.GEMINI_API_KEY;
         if (!API_KEY) {
@@ -17,11 +20,65 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Job not found' }, { status: 404 });
         }
 
-        // 1. Instant Synthesis for Final Report
+        // 1. Generate Initial Skills for "Configure Interview"
+        if (type === 'generate-skills') {
+            const systemPrompt = "You are an expert Technical Recruiter. Your job is to extract key technical skills from job descriptions.";
+            const userPrompt = `
+                Analyze this Job Description:
+                Title: ${selectedJob.title}
+                Level: ${selectedJob.level}
+                Description: ${selectedJob.description}
+                Must Haves: ${selectedJob.must_have.join(', ')}
+
+                Generate a list of 5-7 key technical skills or competencies to evaluate in an interview.
+                Format: Returning ONLY a JSON array of strings. Example: ["React", "System Design", "Go"].
+            `;
+
+            let rawText = "[]";
+            let debugError = null;
+            let providerUsed = "none";
+
+            try {
+                const { text, provider } = await LLMRouter.generate(systemPrompt, userPrompt, 0.2);
+                console.log(`DEBUG: Skills generated via ${provider}`);
+                providerUsed = provider;
+                rawText = text || "[]";
+            } catch (err: any) {
+                console.error("Failed to generate skills via Router", err);
+                debugError = err.message;
+            }
+
+            // Cleanup markdown if present
+            rawText = rawText.replace(/```json|```/gi, '').trim();
+
+            let skills = [];
+            try {
+                skills = JSON.parse(rawText);
+                console.log("DEBUG: Generated Skills from AI:", skills);
+            } catch (e) {
+                console.error("Failed to parse skills JSON", rawText);
+                skills = [];
+            }
+
+            // Return debug info if skills are empty
+            if (skills.length === 0) {
+                return NextResponse.json({
+                    skills,
+                    debug: {
+                        rawText,
+                        error: debugError,
+                        provider: providerUsed
+                    }
+                });
+            }
+
+            return NextResponse.json({ skills });
+        }
+
+        // 2. Instant Synthesis for Final Report
         if (type === 'feedback') {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
-            const synthesisPrompt = `
-                You are a Senior Technical Recruiter at EPAM.
+            const systemPrompt = "You are a Senior Technical Recruiter at EPAM. Provide a final hiring verdict based on technical notes.";
+            const userPrompt = `
                 Review these candidate micro-evaluation notes and provide a final verdict (Hired/Not Hired) and a quick overall summary.
                 
                 Round-by-Round Notes:
@@ -34,46 +91,42 @@ export async function POST(req: NextRequest) {
                 (2 sentences)
             `;
 
-            const res = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ role: 'user', parts: [{ text: synthesisPrompt }] }],
-                    generationConfig: { maxOutputTokens: 512, temperature: 0.2 }
-                })
-            });
-            const data = await res.json();
-            return NextResponse.json({ text: data.candidates?.[0]?.content?.parts?.[0]?.text || 'Summary assembly complete.' });
+            let report = "Summary generation failed.";
+            try {
+                const { text, provider } = await LLMRouter.generate(systemPrompt, userPrompt, 0.2);
+                console.log(`DEBUG: Feedback generated via ${provider}`);
+                report = text || report;
+            } catch (err) {
+                console.error("Failed to generate feedback via Router", err);
+            }
+            return NextResponse.json({ text: report });
         }
 
         // 2. Dynamic Code/Design Validation
         if (type === 'validate') {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`;
+            const systemPrompt = `You are a high-performance terminal diagnostic engine.
+             RULES:
+             1. Respond ONLY as a terminal (prefixed with '> ').
+             2. Be technically accurate.
+             3. End with "COMPILATION SUCCESSFUL" or "ARCHITECTURE VALIDATED".`;
 
-            const validationPrompt = `
-                You are a high-performance terminal diagnostic engine. Analyze the following candidate submission.
-                
+            const userPrompt = `
+                Analyze the following candidate submission.
                 Phase: ${round}
                 Goal: Provide a concise, professional technical critique for a terminal output.
                 Context: ${currentQuestion}
                 Submission: ${code}
-                
-                RULES:
-                1. Respond ONLY as a terminal (prefixed with '> ').
-                2. Be technically accurate. If Code, check for complexity and edge cases. If System Design, check for scalability and SPOFs.
-                3. End with "COMPILATION SUCCESSFUL" or "ARCHITECTURE VALIDATED".
             `;
 
-            const res = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ role: 'user', parts: [{ text: validationPrompt }] }],
-                    generationConfig: { maxOutputTokens: 512, temperature: 0.1 }
-                })
-            });
-            const data = await res.json();
-            let validationText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            let validationText;
+            try {
+                const { text, provider } = await LLMRouter.generate(systemPrompt, userPrompt, 0.1);
+                console.log(`DEBUG: Validation generated via ${provider}`);
+                validationText = text;
+            } catch (err) {
+                console.error("Failed to validate via Router", err);
+                return NextResponse.json({ text: "> Internal Diagnostics Error.\n> AI Engine returned null. Please re-run check." });
+            }
 
             if (!validationText) {
                 return NextResponse.json({ text: "> Internal Diagnostics Error.\n> AI Engine returned null. Please re-run check." });
@@ -84,65 +137,73 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ text: validationText });
         }
 
-        // 3. Chat Mode with High-Density Micro-Evaluations
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`;
+        // 3. Chat Mode with High-Density Micro-Evaluations using LLMRouter
+
         const roundNum = typeof round === 'string'
             ? (round === 'CONCEPTUAL' ? 1 : round === 'CODING' ? 2 : 3)
             : round;
 
         const roundPrompts = [
-            `ROUND 1: CONCEPTUAL Q&A. Focus on high-level architecture and theory.`,
-            `ROUND 2: PROBLEM SOLVING & CODING. Provide a medium-difficulty coding problem related to ${selectedJob.title}.`,
-            `ROUND 3: SYSTEM DESIGN. Focus on scalability for Uber-scale systems.`
+            `ROUND 1: CONCEPTUAL Q&A. Focus on core CS concepts (e.g., HashMaps, Concurrency) and language internals. \n   - Prioritize skills: ${customSkills?.join(', ') || 'General'}.\n   - Rule: Max 2-3 follow-up questions per topic, then move on.`,
+            `ROUND 2: CODING CHALLENGE. LeetCode Style.\n   - Task: Provide a Medium-Hard algorithm problem.\n   - Format required in response text:\n     **Title**\n     **Description**\n     **Example 1**\n     **Constraints**\n   - CRITICAL: You MUST provide a 'codeSnippet' field in the JSON with the starting boilerplate (e.g., class Solution).`,
+            `ROUND 3: SYSTEM DESIGN. Ask for a High-Level Design (HLD) of a complex system (e.g., Scalable URL Shortener). DO NOT ask for code. Focus on components, databases, APIs, and scalability.`
         ];
+
+        // Extract custom skills for context
+        console.log("DEBUG: Received customSkills:", customSkills);
+
+        const skillsContext = customSkills && customSkills.length > 0
+            ? `PRIORITY SKILLS TO ASSESS: ${customSkills.join(', ')}.`
+            : '';
 
         const systemPrompt = `
           You are an EPAM Technical Interviewer for Uber. 
           Phase: ${roundPrompts[roundNum - 1]}
           Current Context (The Question/Task): ${currentQuestion || 'Setting context now.'}
           JD: ${selectedJob.title}, Level: ${selectedJob.level}.
+          ${skillsContext}
 
           IMPORTANT: You must respond in a strict JSON format:
           {
-            "text": "Conversational follow-up or next technical question",
-            "candidateNote": "[Question Context] - [Assessment]. Specify gaps in complexity, edge cases, or architectural depth. Skip if this is a transition/start."
+            "text": "The interview question or response formatted in Markdown",
+            "candidateNote": "[Question Context] - [Assessment]. Specify gaps. Skip if start.",
+            "codeSnippet": "class Solution { ... } // ONLY for Round 2 startup. String."
           }
 
           RULES:
           1. Be technically rigorous.
-          2. The 'candidateNote' must be high-density (e.g., 'Identified O(N) but missed null-checks' or 'Architecture handles 10k RPS but has SPOF in DB').
+          2. The 'candidateNote' must be high-density.
           3. If the candidate hasn't answered yet (start of round), 'candidateNote' MUST be an empty string.
+          4. IF ROUND 2: Force the user to solve the specific algorithm problem provided.
+          5. IF ROUND 3: DO NOT ask for code implementation.
         `;
 
-        const contents = messages.map((m: any) => ({
-            role: m.role === 'model' ? 'model' : 'user',
-            parts: [{ text: typeof m.text === 'string' ? m.text : JSON.stringify(m.text) }]
-        }));
+        // Combine messages into a single user prompt for the Router (simplified for HF/Google compatibility)
+        const lastUserMessage = messages[messages.length - 1].text;
+        const history = messages.slice(0, -1).map((m: any) => `${m.role}: ${m.text}`).join('\n');
 
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: contents,
-                system_instruction: { parts: [{ text: systemPrompt }] },
-                generationConfig: {
-                    responseMimeType: "application/json",
-                    maxOutputTokens: 2048,
-                    temperature: 0.2
-                }
-            })
-        });
+        const fullUserPrompt = `
+        conversation_history:
+        ${history}
+        
+        candidate_latest_response:
+        "${lastUserMessage}"
+        
+        Respond in JSON.
+        `;
 
-        if (!response.ok) {
-            const err = await response.json();
+        let aiResponse;
+        try {
+            const { text, provider } = await LLMRouter.generate(systemPrompt, fullUserPrompt);
+            console.log(`DEBUG: Response generated via ${provider}`);
+            aiResponse = text;
+        } catch (err: any) {
+            console.error("LLM Router Failed:", err);
             return NextResponse.json({
-                text: "The technical engine encountered an error. Let's try to proceed. Can you tell me more about your experience?",
+                text: "The technical engine encountered a critical error. Let's start over.",
                 candidateNote: ""
             });
         }
-
-        const data = await response.json();
-        const aiResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
         if (!aiResponse) {
             return NextResponse.json({
@@ -151,14 +212,22 @@ export async function POST(req: NextRequest) {
             });
         }
 
+        // Strict JSON Clean-up
+        let cleanJson = aiResponse;
+        cleanJson = cleanJson.replace(/```json/gi, '').replace(/```/g, '').trim();
+
         try {
-            const parsed = JSON.parse(aiResponse);
+            const parsed = JSON.parse(cleanJson);
             return NextResponse.json({
                 text: parsed.text || aiResponse,
-                candidateNote: parsed.candidateNote || ""
+                candidateNote: parsed.candidateNote || "",
+                codeSnippet: parsed.codeSnippet || ""
             });
         } catch (e) {
-            return NextResponse.json({ text: aiResponse, candidateNote: "" });
+            console.error("Failed to parse chat JSON:", cleanJson);
+            // Fallback: If parsing fails, try to extract text property via regex if possible, 
+            // or just return the raw text if it looks like a normal message.
+            return NextResponse.json({ text: cleanJson, candidateNote: "" });
         }
 
     } catch (error: any) {

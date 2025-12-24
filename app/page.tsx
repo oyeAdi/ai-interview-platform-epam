@@ -3,20 +3,23 @@
 import React, { useState, useEffect } from 'react';
 import interviewData from '@/data/interview_config.json';
 import InterviewSession from '@/components/InterviewSession';
-import JobAdmin from '@/components/JobAdmin';
-import { Message, JobDescription } from '@/types';
-import { ChevronRight, CheckCircle, Settings, AlertCircle } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import InterviewConfigurator from '@/components/InterviewConfigurator';
+import JobAdmin from '@/components/JobAdmin'; // Restored
+import { Message, JobDescription } from '@/types'; // Restored
+import { ChevronRight, CheckCircle, Settings, AlertCircle } from 'lucide-react'; // Restored
+import ReactMarkdown from 'react-markdown'; // Restored
 
 export default function Home() {
     const [jobs, setJobs] = useState<JobDescription[]>([]);
     const [selectedJob, setSelectedJob] = useState<JobDescription | null>(null);
+    const [isConfiguring, setIsConfiguring] = useState(false);
     const [isStarted, setIsStarted] = useState(false);
     const [isFinished, setIsFinished] = useState(false);
     const [isAdminOpen, setIsAdminOpen] = useState(false);
     const [transcript, setTranscript] = useState<Message[]>([]);
     const [feedback, setFeedback] = useState<string>('');
     const [loadingFeedback, setLoadingFeedback] = useState(false);
+    const [customSkills, setCustomSkills] = useState<string[]>([]);
 
     // Fetch jobs on mount and when admin updates
     const fetchJobs = async () => {
@@ -35,10 +38,20 @@ export default function Home() {
         fetchJobs();
     }, []);
 
-    const handleStart = () => {
+    const handleSelectJob = (job: JobDescription) => {
+        setSelectedJob(job);
+    };
+
+    const handleStart = () => { // Restored for the main button
         if (selectedJob) {
-            setIsStarted(true);
+            setIsConfiguring(true); // Changed to start config instead of session immediately
         }
+    };
+
+    const handleStartSession = (skills: string[]) => {
+        setCustomSkills(skills);
+        setIsConfiguring(false);
+        setIsStarted(true);
     };
 
     const handleFinish = async (messages: Message[], summaries: string[], recordingBlob: Blob | null, fullReport: string) => {
@@ -169,10 +182,20 @@ export default function Home() {
         );
     }
 
+    if (isConfiguring && selectedJob) {
+        return (
+            <InterviewConfigurator
+                selectedJob={selectedJob}
+                onStart={handleStartSession}
+                onBack={() => setIsConfiguring(false)}
+            />
+        );
+    }
+
     if (isStarted && selectedJob) {
         return (
             <div className="min-h-screen bg-[#f8f8f8] flex items-center justify-center p-4">
-                <InterviewSession selectedJobId={selectedJob.id} onFinish={handleFinish} />
+                <InterviewSession selectedJobId={selectedJob.id} customSkills={customSkills} onFinish={handleFinish} />
             </div>
         );
     }

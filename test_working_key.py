@@ -1,23 +1,53 @@
 import requests
 import json
 
-api_key = "AIzaSyA3Ahw6Vu4V5FdLMMEdhuR1VTMDrQsjBTM"
+API_URL = "http://localhost:3000/api/interview"
+HEADERS = {"Content-Type": "application/json"}
 
-def test_key():
-    # Use gemini-2.0-flash as discovered in list_models
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
-    payload = {"contents": [{"parts": [{"text": "Say 'OK'"}]}]}
-    print(f"Testing key with gemini-2.0-flash...")
+def test_chat_interaction(round_num, message_history, last_msg):
+    print(f"\n--- Testing Round {round_num} Interaction ---")
+    payload = {
+        "type": "chat",
+        "selectedJobId": "sde1",
+        "round": round_num,
+        "currentQuestion": "Previous question context if any",
+        "customSkills": ["Java", "System Design"],
+        "messages": message_history + [{"role": "user", "text": last_msg}]
+    }
+    
     try:
-        response = requests.post(url, json=payload, headers={"Content-Type": "application/json"})
-        print(f"Status: {response.status_code}")
+        response = requests.post(API_URL, headers=HEADERS, json=payload, timeout=30)
         if response.status_code == 200:
-            print("✓ SUCCESS!")
-            print(f"Response: {response.json().get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '')}")
+            data = response.json()
+            print(f"User: {last_msg}")
+            print(f"AI: {data.get('text', 'No text response')}")
+            print(f"Note: {data.get('candidateNote', 'No note')}")
+            
+            # Simple heuristic check
+            ai_text = data.get('text', '').lower()
+            if round_num == 2 and "code" not in ai_text and "function" not in ai_text:
+                 print("⚠️ WARNING: Round 2 (Coding) response might be off-topic (expected coding problem).")
+            elif round_num == 1 and ("code" in ai_text or "function" in ai_text):
+                 print("⚠️ WARNING: Round 1 (Conceptual) response looks like a coding question.")
+                 
         else:
-            print(f"Response: {response.text}")
+            print(f"❌ Error {response.status_code}: {response.text}")
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"❌ Exception: {str(e)}")
+
+def main():
+    # Scenario 1: Start of Round 1
+    history = []
+    test_chat_interaction(1, history, "I am ready to start the interview.")
+
+    # Scenario 2: Mid Round 1
+    history.append({"role": "user", "text": "I am ready."})
+    history.append({"role": "ai", "text": "Great. Let's start with Java. What is the difference between an Interface and an Abstract Class?"})
+    test_chat_interaction(1, history, "An interface only has method signatures, but an abstract class can have implementation. Also you can implement multiple interfaces.")
+    
+    # Scenario 3: Start of Round 2 (Coding)
+    # History reset for new round usually, or persisted. Let's try clean slash for round 2 start behavior.
+    test_chat_interaction(2, [], "I am ready for the coding round.")
 
 if __name__ == "__main__":
-    test_key()
+    main()

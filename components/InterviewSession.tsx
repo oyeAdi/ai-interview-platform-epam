@@ -7,12 +7,13 @@ import clsx from 'clsx';
 
 interface InterviewSessionProps {
     selectedJobId: string;
+    customSkills?: string[]; // Added prop
     onFinish: (transcript: Message[], summaries: string[], recordingBlob: Blob | null, fullReport: string) => void;
 }
 
 type Round = 'CONCEPTUAL' | 'CODING' | 'SYSTEM_DESIGN';
 
-export default function InterviewSession({ selectedJobId, onFinish }: InterviewSessionProps) {
+export default function InterviewSession({ selectedJobId, customSkills = [], onFinish }: InterviewSessionProps) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [technicalReport, setTechnicalReport] = useState<string>('');
     const [input, setInput] = useState('');
@@ -61,18 +62,25 @@ export default function InterviewSession({ selectedJobId, onFinish }: InterviewS
                     selectedJobId,
                     type: 'chat',
                     round: roundNum,
+                    customSkills, // Pass custom skills to API
                     currentQuestion: messages.length > 0 ? currentQuestion : ""
                 }),
             });
             const data = await res.json();
             if (data.text) {
                 setMessages((prev) => [...prev, { role: 'model', text: data.text }]);
+
+                // Auto-Paste Boilerplate (Round 2)
+                if (data.codeSnippet) {
+                    setCode(data.codeSnippet);
+                }
+
                 if (data.candidateNote && data.candidateNote.trim().length > 5) {
                     const roundTitle = (targetRound || currentRound).charAt(0) + (targetRound || currentRound).slice(1).toLowerCase().replace('_', ' ');
                     setTechnicalReport(prev => prev + `\n### ${roundTitle} - Note:\n- ${data.candidateNote}\n`);
                 }
             } else {
-                setMessages((prev) => [...prev, { role: 'model', text: "Welcome! We are ready to begin. What technical areas are you most comfortable with?" }]);
+                setMessages((prev) => [...prev, { role: 'model', text: "Ready. Let's begin." }]);
             }
         } catch (err) {
             console.error('Failed to trigger AI', err);
@@ -191,6 +199,11 @@ export default function InterviewSession({ selectedJobId, onFinish }: InterviewS
             const data = await res.json();
             if (data.text) {
                 setMessages((prev) => [...prev, { role: 'model', text: data.text }]);
+
+                if (data.codeSnippet) {
+                    setCode(data.codeSnippet);
+                }
+
                 if (data.candidateNote && data.candidateNote.trim().length > 5) {
                     const roundTitle = currentRound.charAt(0) + currentRound.slice(1).toLowerCase().replace('_', ' ');
                     setTechnicalReport(prev => prev + `\n### ${roundTitle} - Note:\n- ${data.candidateNote}\n`);
