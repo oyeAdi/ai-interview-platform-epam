@@ -713,12 +713,14 @@ For Behavioral Questions: Competency-based assessment`;
                 }
 
                 IMPORTANT GUIDELINES:
-                1. Be STRICT about completeness - boilerplate code is NOT acceptable
-                2. Detect common empty patterns: "TODO", "return 0", "return null", "pass", "throw new Error('Not implemented')"
-                3. For design rounds, focus on architecture/strategy, not implementation details
-                4. For coding rounds, FIRST check completeness, THEN check syntax, THEN evaluate logic
-                5. Be constructive but HONEST - don't say code compiles if it doesn't
-                6. Use role-appropriate terminology and evaluation criteria
+                1. ONLY mark as incomplete if code is CLEARLY boilerplate (empty methods, TODO comments, placeholder returns)
+                2. If a function has actual logic (loops, conditionals, string manipulation, etc.), it is NOT incomplete
+                3. Detect common empty patterns: "TODO", "return 0;", "return null;", "pass", "throw new Error('Not implemented')"
+                4. For design rounds, focus on architecture/strategy, not implementation details
+                5. For coding rounds, FIRST check completeness, THEN check syntax, THEN evaluate logic
+                6. Be constructive but HONEST - if code has real implementation, acknowledge it even if logic might be imperfect
+                7. Use role-appropriate terminology and evaluation criteria
+                8. CRITICAL: A complete implementation with potential logic issues is BETTER than marking it incomplete
             `;
 
             try {
@@ -900,7 +902,8 @@ For Behavioral Questions: Competency-based assessment`;
              2. ${roleType === 'TECHNICAL' ? 'BOILERPLATE: You MUST populate the \'codeSnippet\' field with a working starter class or function.' : 'FRAMEWORK: You MUST provide a structured approach framework for business/creative problems.'}
              3. NO REPEATS: NEVER provide the same problem/scenario twice.
              4. FOCUS: ${roleType === 'TECHNICAL' ? 'Algorithmic problem solving.' : roleType === 'BUSINESS' ? 'Business problem-solving and analysis.' : 'Creative problem-solving and execution.'}
-             5. UNIQUENESS: Check conversation history carefully to avoid repeats.`,
+             5. UNIQUENESS: Check conversation history carefully to avoid repeats.
+             6. NEXT CHALLENGE TRIGGER: If the user says "NEXT CHALLENGE", you MUST provide a BRAND NEW ${roleType === 'TECHNICAL' ? 'coding problem' : 'case study'} with full format (Title, Description, Examples, Constraints). DO NOT ask follow-up questions about the previous problem.`,
 
             // Round 3: Design/Strategy - Universal but role-adaptive
             `### ROUND 3 GUARDIAN: DESIGN/STRATEGY ENFORCER
@@ -963,7 +966,7 @@ For Behavioral Questions: Competency-based assessment`;
              - EVALUATION: Focus on their approach, code quality, edge case handling.
              - NO HELPING: If they struggle, do not provide hints. Observe their problem-solving process.
              - COMPLETION: Once they provide a solution (or give up), provide evaluation and move on.
-             - TIME MANAGEMENT: This is one problem only, not multiple.
+             - TIME MANAGEMENT: Respect the configured number of coding challenges. Generate one problem at a time.
              ${customSkills && customSkills.length > 0 ? `- MANDATORY: Problem and code MUST use: ${customSkills.join(', ')}` : ''}`
                 : `ROUND 2: PRACTICAL CASE STUDY ASSESSMENT.
              - Goal: Evaluate analytical thinking and problem-solving in business context.
@@ -1127,7 +1130,7 @@ IMPORTANT: DO NOT ask about these topics again. Choose NEW, DIFFERENT topics.`
                     console.log(`[DEBUG] Previous topics:`, previousTopics);
 
                     // Extract meaningful keywords from the new question (ignore common question words)
-                    const commonWords = ['which', 'what', 'how', 'why', 'following', 'best', 'describes', 'characteristic', 'not', 'is', 'are', 'the', 'of', 'a', 'an', 'in', 'to', 'for', 'from', 'with', 'that', 'this', 'these', 'those'];
+                    const commonWords = ['which', 'what', 'how', 'why', 'following', 'best', 'describes', 'characteristic', 'not', 'is', 'are', 'the', 'of', 'a', 'an', 'in', 'to', 'for', 'from', 'with', 'that', 'this', 'these', 'those', 'used', 'using', 'use', 'does', 'would', 'should', 'could', 'common', 'most', 'least', 'data', 'system'];
                     const extractKeywords = (text: string) => {
                         return text
                             .replace(/[^a-z0-9\s]/g, ' ')
@@ -1148,8 +1151,8 @@ IMPORTANT: DO NOT ask about these topics again. Choose NEW, DIFFERENT topics.`
                             topicWords.some(topicWord => topicWord === word || topicWord.includes(word) || word.includes(topicWord))
                         ).length;
 
-                        // If more than 2 keywords match, it's likely a duplicate topic
-                        const isDup = matchCount >= 3;
+                        // If more than 3 keywords match, it's likely a duplicate topic
+                        const isDup = matchCount >= 4;
                         if (isDup) {
                             console.log(`[DEBUG] Duplicate detected - ${matchCount} matching keywords with topic:`, topic.substring(0, 50));
                         }

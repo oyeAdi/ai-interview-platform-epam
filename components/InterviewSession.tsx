@@ -19,11 +19,12 @@ interface InterviewSessionProps {
         systemDesign?: { enabled?: boolean };
     };
     onFinish: (transcript: Message[], summaries: string[], recordingBlob: Blob | null, fullReport: string) => void;
+    onPermissionDenied?: () => void;
 }
 
 type Round = 'MCQ' | 'CONCEPTUAL' | 'CODING' | 'SYSTEM_DESIGN';
 
-export default function InterviewSession({ selectedJobId, customSkills = [], candidateName = "Candidate", mode = 'DM', config, onFinish }: InterviewSessionProps) {
+export default function InterviewSession({ selectedJobId, customSkills = [], candidateName = "Candidate", mode = 'DM', config, onFinish, onPermissionDenied }: InterviewSessionProps) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [technicalReport, setTechnicalReport] = useState<string>('');
     const [input, setInput] = useState('');
@@ -230,35 +231,20 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
                 finishInterview();
             }
         } else if (currentRound === 'CODING') {
-            const maxCodingQs = config?.coding?.maxQuestions || 1;
-            if (codingChallengeCount < maxCodingQs) {
-                // Stay in Coding Round, Next Question
-                setCodingChallengeCount(prev => prev + 1);
+            // Check if System Design is enabled
+            if (config?.systemDesign?.enabled) {
+                // CAPTURE CODING WORKSPACE BEFORE MOVING
+                setTechnicalReport(prev => prev + `\n\n## FINAL CODING WORKSPACE CAPTURE\n\`\`\`\n${code}\n\`\`\`\n`);
 
-                // --- ROLE AWARE PLACEHOLDER ---
-                const isNonTech = (selectedJobId || '').includes('pm') || (selectedJobId || '').includes('hr');
-                setCode(isNonTech ? 'Loading next case study...' : '// Next challenge loading...');
-
+                setCurrentRound('SYSTEM_DESIGN');
+                setCode('');
+                setCurrentChallenge('');
                 setConsoleOutput('');
-                const transitionMsg = `Coding Challenge ${codingChallengeCount} complete. Loading Challenge ${codingChallengeCount + 1}...`;
+                const transitionMsg = "Coding round complete. Transitioning to Round 4: Strategy / System Design.";
                 setMessages(prev => [...prev, { role: 'model', text: transitionMsg }]);
-                triggerAI(`Candidate finished question ${codingChallengeCount}. Move to Question ${codingChallengeCount + 1}. Provide a NEW and DIFFERENT coding problem than the previous ones.`, 'CODING', true);
+                triggerAI('Transition to System Design Round. Provide a design scenario.', 'SYSTEM_DESIGN', true);
             } else {
-                // Check if System Design is enabled
-                if (config?.systemDesign?.enabled) {
-                    // CAPTURE CODING WORKSPACE BEFORE MOVING
-                    setTechnicalReport(prev => prev + `\n\n## FINAL CODING WORKSPACE CAPTURE\n\`\`\`\n${code}\n\`\`\`\n`);
-
-                    setCurrentRound('SYSTEM_DESIGN');
-                    setCode('');
-                    setCurrentChallenge('');
-                    setConsoleOutput('');
-                    const transitionMsg = "Coding round complete. Transitioning to Round 4: Strategy / System Design.";
-                    setMessages(prev => [...prev, { role: 'model', text: transitionMsg }]);
-                    triggerAI('Transition to System Design Round. Provide a design scenario.', 'SYSTEM_DESIGN', true);
-                } else {
-                    finishInterview();
-                }
+                finishInterview();
             }
         } else {
             finishInterview();
@@ -325,10 +311,6 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
         if (currentRound === 'CONCEPTUAL') maxQs = config?.conceptual?.maxQuestions || 10;
         if (currentRound === 'CODING') maxQs = (config?.coding?.maxQuestions || 1) * 3; // Allow some back-and-forth but cap it
 
-        if (questionCount >= maxQs) {
-            handleRoundTransition();
-            return;
-        }
 
         const roundNum = currentRound === 'MCQ' ? 0 : currentRound === 'CONCEPTUAL' ? 1 : currentRound === 'CODING' ? 2 : 3;
         const userInput = (currentRound === 'CODING' || currentRound === 'SYSTEM_DESIGN')
@@ -339,6 +321,13 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
         const newHistory = [...messages, newMsg];
         setMessages(newHistory);
         setInput('');
+
+        // Check if this was the last question - if so, transition after displaying the answer
+        if (questionCount >= maxQs) {
+            handleRoundTransition();
+            return;
+        }
+
         setIsLoading(true);
 
         try {
@@ -424,7 +413,20 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
                 recorderRef.current = recorder;
 
                 triggerAI();
-            } catch (err) {
+            } catch (err: any) {
+                // Check if user denied screen share permission
+                if (err.name === 'NotAllowedError' || err.message?.includes('Permission denied')) {
+                    // Screen share is MANDATORY - terminate interview immediately
+                    setIsActive(false);
+
+                    // Call the permission denied callback if provided
+                    if (onPermissionDenied) {
+                        onPermissionDenied();
+                    }
+                    return;
+                }
+
+                // For other errors, log and try to continue
                 console.error("Recording setup failed:", err);
                 triggerAI();
             }
@@ -568,7 +570,7 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
                                 disabled={isLoading}
                                 className="w-full flex items-center justify-center gap-2 px-4 py-4 bg-[#0095A9] hover:bg-[#008496] text-white rounded-2xl transition-all duration-300 font-bold text-xs uppercase tracking-widest shadow-lg shadow-[#0095A9]/20 group disabled:opacity-50"
                             >
-                                {currentRound === 'SYSTEM_DESIGN' ? 'Finish' : (currentRound === 'CODING' && codingChallengeCount < (config?.coding?.maxQuestions || 1) ? 'Next Challenge' : 'Next Stage')}
+                                {currentRound === 'SYSTEM_DESIGN' ? 'Finish' : 'Next Stage'}
                                 <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                             </button>
                         </div>
@@ -679,8 +681,8 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
                                     }}
                                     disabled={isLoading || timeLeft <= 0}
                                     className={`px-6 py-3 font-black text-sm rounded-xl disabled:opacity-30 transition-all transform hover:scale-105 active:scale-95 shadow-sm ${input === option
-                                            ? 'bg-[#0095A9] text-white border-2 border-[#0095A9]'
-                                            : 'bg-white border-2 border-slate-200 text-slate-700 hover:border-[#0095A9] hover:bg-[#0095A9]/5 hover:text-[#0095A9]'
+                                        ? 'bg-[#0095A9] text-white border-2 border-[#0095A9]'
+                                        : 'bg-white border-2 border-slate-200 text-slate-700 hover:border-[#0095A9] hover:bg-[#0095A9]/5 hover:text-[#0095A9]'
                                         }`}
                                 >
                                     {option}
@@ -688,34 +690,154 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
                             ))}
                         </div>
                     )}
+
+                    {/* Next Challenge Button for All Rounds with Multiple Questions */}
+                    {(() => {
+                        let maxQuestions = 0;
+                        let buttonText = 'Next Question';
+
+                        if (currentRound === 'MCQ') {
+                            maxQuestions = config?.mcq?.maxQuestions || 7;
+                            buttonText = 'Next Question';
+                        } else if (currentRound === 'CONCEPTUAL') {
+                            maxQuestions = config?.conceptual?.maxQuestions || 10;
+                            buttonText = 'Next Question';
+                        } else if (currentRound === 'CODING') {
+                            maxQuestions = config?.coding?.maxQuestions || 1;
+                            buttonText = 'Next Challenge';
+                        } else if (currentRound === 'SYSTEM_DESIGN') {
+                            maxQuestions = (config as any)?.systemDesign?.maxQuestions || 1;
+                            buttonText = 'Next Challenge';
+                        }
+
+                        const showButton = questionCount < maxQuestions && maxQuestions > 1;
+
+                        return showButton ? (
+                            <div className="mt-4 flex items-center gap-3">
+                                <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Ready for next?</span>
+                                <button
+                                    onClick={() => {
+                                        if (currentRound === 'CODING' || currentRound === 'SYSTEM_DESIGN') {
+                                            setCode('');
+                                            setConsoleOutput('');
+                                            sendMessage('NEXT CHALLENGE: Please provide a NEW coding problem with Title, Description, Example Input/Output, Constraints, and starter code. Do NOT ask follow-up questions about the previous problem.');
+                                        } else {
+                                            setInput('');
+                                            sendMessage(`I am ready for the next ${currentRound === 'MCQ' ? 'MCQ question' : 'conceptual question'}.`);
+                                        }
+                                    }}
+                                    disabled={isLoading}
+                                    className="px-6 py-3 bg-slate-600 hover:bg-slate-700 text-white font-black text-sm rounded-xl disabled:opacity-30 transition-all transform hover:scale-105 active:scale-95 shadow-sm"
+                                >
+                                    {buttonText}
+                                </button>
+                            </div>
+                        ) : null;
+                    })()}
                 </div>
             </div>
 
             {/* Right (45%) - Workspace Panel */}
             <div className="w-[45%] h-full bg-[#F1F5F9] border-l border-slate-200 flex flex-col overflow-hidden">
                 {currentRound === 'MCQ' || currentRound === 'CONCEPTUAL' ? (
-                    <div className="flex-1 flex flex-col items-center justify-center p-12 text-center space-y-8 animate-in fade-in duration-1000">
-                        <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center shadow-xl shadow-slate-200/50">
-                            <ShieldCheck className="w-10 h-10 text-[#0095A9]" />
+                    <div className="flex-1 flex flex-col p-8 space-y-6 overflow-y-auto">
+                        {/* Progress Tracker */}
+                        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+                            <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-xs font-black text-[#0095A9] uppercase tracking-widest">
+                                    {currentRound === 'MCQ' ? 'Round 1: Screening' : 'Round 2: Conceptual'}
+                                </h3>
+                                <div className="flex items-center gap-2">
+                                    <Clock className="w-4 h-4 text-slate-400" />
+                                    <span className="text-sm font-bold text-slate-600">
+                                        {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div className="space-y-3">
+                                <div className="flex items-center justify-between text-sm">
+                                    <span className="text-slate-500 font-medium">Progress</span>
+                                    <span className="font-black text-slate-700">
+                                        Question {questionCount} of {currentRound === 'MCQ' ? (config?.mcq?.maxQuestions || 7) : (config?.conceptual?.maxQuestions || 10)}
+                                    </span>
+                                </div>
+                                <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                                    <div
+                                        className="bg-gradient-to-r from-[#0095A9] to-[#00B4CC] h-full transition-all duration-500 rounded-full"
+                                        style={{
+                                            width: `${(questionCount / (currentRound === 'MCQ' ? (config?.mcq?.maxQuestions || 7) : (config?.conceptual?.maxQuestions || 10))) * 100}%`
+                                        }}
+                                    />
+                                </div>
+                            </div>
                         </div>
-                        <div>
-                            <h3 className="text-xl font-black text-slate-800 uppercase tracking-[0.2em] mb-4">Round {currentRound === 'MCQ' ? '01' : '02'}: {currentRound === 'MCQ' ? 'Screening' : 'Conceptual'}</h3>
-                            <p className="text-slate-500 text-sm leading-relaxed max-w-sm">
-                                {currentRound === 'MCQ' ? 'Rapid-fire validation of core concepts.' : 'Evaluating architectural patterns and conceptual depth.'}
-                                The technical workspace will activate during the practical assessment.
+
+                        {/* Evaluation Criteria */}
+                        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+                            <div className="flex items-center gap-2 mb-4">
+                                <ListChecks className="w-5 h-5 text-[#0095A9]" />
+                                <h3 className="text-xs font-black text-slate-700 uppercase tracking-widest">What We're Evaluating</h3>
+                            </div>
+                            <ul className="space-y-2 text-sm text-slate-600">
+                                {currentRound === 'MCQ' ? (
+                                    <>
+                                        <li className="flex items-start gap-2">
+                                            <CheckCircle className="w-4 h-4 text-[#0095A9] mt-0.5 flex-shrink-0" />
+                                            <span>Core technical knowledge</span>
+                                        </li>
+                                        <li className="flex items-start gap-2">
+                                            <CheckCircle className="w-4 h-4 text-[#0095A9] mt-0.5 flex-shrink-0" />
+                                            <span>Foundational concepts</span>
+                                        </li>
+                                        <li className="flex items-start gap-2">
+                                            <CheckCircle className="w-4 h-4 text-[#0095A9] mt-0.5 flex-shrink-0" />
+                                            <span>Quick decision-making</span>
+                                        </li>
+                                    </>
+                                ) : (
+                                    <>
+                                        <li className="flex items-start gap-2">
+                                            <CheckCircle className="w-4 h-4 text-[#0095A9] mt-0.5 flex-shrink-0" />
+                                            <span>Deep understanding of concepts</span>
+                                        </li>
+                                        <li className="flex items-start gap-2">
+                                            <CheckCircle className="w-4 h-4 text-[#0095A9] mt-0.5 flex-shrink-0" />
+                                            <span>Problem-solving approach</span>
+                                        </li>
+                                        <li className="flex items-start gap-2">
+                                            <CheckCircle className="w-4 h-4 text-[#0095A9] mt-0.5 flex-shrink-0" />
+                                            <span>Communication clarity</span>
+                                        </li>
+                                    </>
+                                )}
+                            </ul>
+                        </div>
+
+                        {/* Tips */}
+                        <div className="bg-gradient-to-br from-[#0095A9]/5 to-[#00B4CC]/5 rounded-2xl p-6 border border-[#0095A9]/10">
+                            <div className="flex items-center gap-2 mb-3">
+                                <Zap className="w-5 h-5 text-[#0095A9]" />
+                                <h3 className="text-xs font-black text-slate-700 uppercase tracking-widest">Tip for This Round</h3>
+                            </div>
+                            <p className="text-sm text-slate-600 leading-relaxed">
+                                {currentRound === 'MCQ'
+                                    ? "Take your time to read each question carefully. There's no penalty for thinking before answering."
+                                    : "Explain your thought process clearly. We value how you approach problems, not just the final answer."
+                                }
                             </p>
                         </div>
-                        <div className="grid grid-cols-2 gap-4 w-full max-w-md pt-8 border-t border-slate-200">
-                            <div className="p-5 bg-white rounded-3xl border border-slate-100 shadow-sm">
-                                <p className="text-[10px] font-black text-[#0095A9] uppercase tracking-widest mb-1 italic">Security</p>
-                                <p className="text-xs text-slate-600 font-bold italic tracking-tight">Active Protocol</p>
-                            </div>
-                            <div className="p-5 bg-white rounded-3xl border border-slate-100 shadow-sm">
-                                <p className="text-[10px] font-black text-[#0095A9] uppercase tracking-widest mb-1 italic">Vitals</p>
-                                <div className="flex items-center gap-2 justify-center">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-[#00FF41]"></div>
-                                    <p className="text-xs text-slate-600 font-bold italic">Nominal</p>
-                                </div>
+
+                        {/* Job Details */}
+                        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 mt-auto">
+                            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Interview For</h3>
+                            <p className="text-sm font-bold text-slate-700 mb-1">
+                                {selectedJobId ? selectedJobId.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : 'Technical Position'}
+                            </p>
+                            <p className="text-xs text-slate-500">EPAM Systems</p>
+
+                            <div className="mt-4 pt-4 border-t border-slate-100">
+                                <p className="text-xs text-slate-400">Need help? Press <kbd className="px-2 py-1 bg-slate-100 rounded text-slate-600 font-mono">F1</kbd></p>
                             </div>
                         </div>
                     </div>
@@ -755,13 +877,29 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
                                         <div className="w-2 h-2 rounded-full bg-green-500/50"></div>
                                         <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] italic">Standard Shell</span>
                                     </div>
-                                    <button
-                                        onClick={runCheck}
-                                        disabled={isRunning}
-                                        className="px-4 py-1.5 bg-[#0095A9] hover:bg-[#008496] text-[10px] text-white font-black rounded-lg transition-all transform active:scale-95 uppercase tracking-widest disabled:opacity-50"
-                                    >
-                                        {isRunning ? 'Analyzing...' : ((selectedJobId || '').includes('pm') || (selectedJobId || '').includes('hr') ? 'Evaluate Plan' : 'Execute Checks')}
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={runCheck}
+                                            disabled={isRunning}
+                                            className="px-4 py-1.5 bg-[#0095A9] hover:bg-[#008496] text-[10px] text-white font-black rounded-lg transition-all transform active:scale-95 uppercase tracking-widest disabled:opacity-50"
+                                        >
+                                            {isRunning ? 'Analyzing...' : ((selectedJobId || '').includes('pm') || (selectedJobId || '').includes('hr') ? 'Evaluate Plan' : 'Execute Checks')}
+                                        </button>
+                                        {currentRound === 'CODING' && codingChallengeCount < (config?.coding?.maxQuestions || 1) && (
+                                            <button
+                                                onClick={() => {
+                                                    setCode('');
+                                                    setConsoleOutput('');
+                                                    setCodingChallengeCount(prev => prev + 1);
+                                                    sendMessage('I am ready for the next coding challenge.');
+                                                }}
+                                                disabled={isLoading}
+                                                className="px-4 py-1.5 bg-slate-600 hover:bg-slate-700 text-[10px] text-white font-black rounded-lg transition-all transform active:scale-95 uppercase tracking-widest disabled:opacity-50"
+                                            >
+                                                Next Challenge
+                                            </button>
+                                        )}
+                                    </div>
                                 </div>
                                 <div className="flex-1 p-5 font-mono text-xs text-green-400/90 overflow-y-auto scrollbar-thin scrollbar-thumb-white/10">
                                     <pre className="whitespace-pre-wrap">{consoleOutput || '> System ready. Awaiting instructions...'}</pre>

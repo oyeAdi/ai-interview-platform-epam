@@ -24,6 +24,7 @@ export default function AssessmentLanding() {
     const [loading, setLoading] = useState(true);
     const [started, setStarted] = useState(false);
     const [completed, setCompleted] = useState(false);
+    const [permissionDenied, setPermissionDenied] = useState(false);
 
     useEffect(() => {
         try {
@@ -96,6 +97,27 @@ export default function AssessmentLanding() {
         );
     }
 
+    if (permissionDenied) {
+        return (
+            <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6 text-center animate-in fade-in zoom-in duration-500">
+                <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mb-6">
+                    <AlertCircle className="w-10 h-10 text-red-500" />
+                </div>
+                <h1 className="text-4xl font-black text-[#003040] mb-4">Interview Terminated</h1>
+                <p className="text-xl text-slate-500 max-w-lg mx-auto mb-8">
+                    Screen sharing permission was denied. Screen sharing is <span className="font-bold text-red-600">mandatory</span> for this interview to ensure assessment integrity and prevent cheating.
+                </p>
+                <div className="p-6 bg-red-50 rounded-2xl border-2 border-red-200 max-w-md w-full">
+                    <p className="text-xs font-bold text-red-700 uppercase tracking-widest mb-2">Action Required</p>
+                    <p className="text-sm text-red-800 font-semibold">
+                        Please contact your Delivery Manager immediately to reschedule this interview.
+                    </p>
+                </div>
+                <p className="mt-12 text-xs text-slate-400">Interview ID: {new Date().getTime()} | Status: Permission Denied</p>
+            </div>
+        );
+    }
+
     if (completed) {
         return (
             <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6 text-center animate-in fade-in zoom-in duration-500">
@@ -124,6 +146,7 @@ export default function AssessmentLanding() {
                     selectedJobId={tokenData.jobId}
                     customSkills={tokenData.skills}
                     onFinish={handleFinish}
+                    onPermissionDenied={() => setPermissionDenied(true)}
                     candidateName={tokenData.candidateName}
                     mode="CANDIDATE"
                     config={tokenData.config}
