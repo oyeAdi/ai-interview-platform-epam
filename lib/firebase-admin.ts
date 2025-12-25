@@ -1,9 +1,9 @@
 import * as admin from 'firebase-admin';
 
-if (!admin.apps.length) {
-    const privateKey = process.env.FIREBASE_PRIVATE_KEY
-        ? process.env.FIREBASE_PRIVATE_KEY.replace(/^["']|["']$/g, '').replace(/\\n/g, '\n')
-        : undefined;
+const isFirebaseConfigured = process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY;
+
+if (isFirebaseConfigured && !admin.apps.length) {
+    const privateKey = process.env.FIREBASE_PRIVATE_KEY!.replace(/^["']|["']$/g, '').replace(/\\n/g, '\n');
 
     admin.initializeApp({
         credential: admin.credential.cert({
@@ -15,4 +15,4 @@ if (!admin.apps.length) {
     });
 }
 
-export const bucket = admin.storage().bucket();
+export const bucket = isFirebaseConfigured ? admin.storage().bucket() : null as any;
