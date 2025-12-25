@@ -9,9 +9,9 @@ const isSupabaseAdminConfigured = !!(supabaseUrl && supabaseServiceRoleKey);
 
 if (!isSupabaseConfigured || !isSupabaseAdminConfigured) {
     console.warn('[Supabase] Configuration status:', {
-        url: !!supabaseUrl,
-        anonKey: !!supabaseAnonKey,
-        serviceRoleKey: !!supabaseServiceRoleKey
+        url: supabaseUrl ? `Present (Length: ${supabaseUrl.length})` : 'MISSING',
+        anonKey: supabaseAnonKey ? `Present (Length: ${supabaseAnonKey.length})` : 'MISSING',
+        serviceRoleKey: supabaseServiceRoleKey ? `Present (Length: ${supabaseServiceRoleKey.length})` : 'MISSING'
     });
 }
 
