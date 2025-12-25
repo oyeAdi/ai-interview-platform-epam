@@ -11,7 +11,9 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "@huggingface/inference": "^4.13.5",
+    "@supabase/supabase-js": "^2.89.0",
     "clsx": "^2.1.1",
+    "firebase-admin": "^13.6.0",
     "lucide-react": "^0.562.0",
     "next": "16.1.1",
     "react": "19.2.3",

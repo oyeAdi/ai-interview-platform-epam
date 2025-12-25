@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { bucket } from '@/lib/firebase-admin';
 
 export async function GET(req: NextRequest) {
     const folder = req.nextUrl.searchParams.get('folder');
@@ -8,41 +7,27 @@ export async function GET(req: NextRequest) {
         return new NextResponse("Folder required", { status: 400 });
     }
 
-    const videoPath = path.join(process.cwd(), 'data', 'sessions', folder, 'recording.webm');
+    try {
+        // Firebase path: sessions/{folder}/recording.webm
+        const file = bucket.file(`sessions/${folder}/recording.webm`);
 
-    if (!fs.existsSync(videoPath)) {
-        return new NextResponse("Video not found", { status: 404 });
-    }
+        // Check if file exists in Firebase
+        const [exists] = await file.exists();
+        if (!exists) {
+            console.warn(`[Video API] Recording not found in Firebase: sessions/${folder}/recording.webm`);
+            return new NextResponse("Video not found in cloud storage", { status: 404 });
+        }
 
-    const stat = fs.statSync(videoPath);
-    const fileSize = stat.size;
-    const range = req.headers.get('range');
-
-    if (range) {
-        const parts = range.replace(/bytes=/, "").split("-");
-        const start = parseInt(parts[0], 10);
-        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-        const chunksize = (end - start) + 1;
-        const file = fs.createReadStream(videoPath, { start, end });
-
-        // @ts-ignore
-        return new NextResponse(file, {
-            status: 206,
-            headers: {
-                'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-                'Accept-Ranges': 'bytes',
-                'Content-Length': chunksize.toString(),
-                'Content-Type': 'video/webm',
-            }
+        // Generate a signed URL (valid for 1 hour)
+        const [signedUrl] = await file.getSignedUrl({
+            action: 'read',
+            expires: Date.now() + 3600 * 1000,
         });
-    } else {
-        const file = fs.createReadStream(videoPath);
-        // @ts-ignore
-        return new NextResponse(file, {
-            headers: {
-                'Content-Length': fileSize.toString(),
-                'Content-Type': 'video/webm',
-            }
-        });
+
+        // Redirect to the signed URL
+        return NextResponse.redirect(signedUrl);
+    } catch (err: any) {
+        console.error("Firebase Video API error:", err);
+        return new NextResponse("Internal Server Error", { status: 500 });
     }
 }

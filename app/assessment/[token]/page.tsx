@@ -30,8 +30,16 @@ export default function AssessmentLanding() {
         try {
             const token = params.token as string;
             if (token) {
-                // Decode Base64
-                const jsonStr = atob(decodeURIComponent(token));
+                // Restore standard Base64 from Base64URL
+                let base64 = token.replace(/-/g, '+').replace(/_/g, '/');
+                while (base64.length % 4) {
+                    base64 += '=';
+                }
+
+                const binaryStr = atob(base64);
+                const jsonStr = decodeURIComponent(binaryStr.split('').map(c => {
+                    return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+                }).join(''));
                 const data = JSON.parse(jsonStr);
 
                 // Backwards compatibility

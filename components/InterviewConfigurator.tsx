@@ -115,7 +115,14 @@ export default function InterviewConfigurator({ selectedJob, onStart, onBack }: 
             }
         };
 
-        const token = btoa(JSON.stringify(sessionData));
+        // Use a Base64URL safe way to encode the session data
+        const jsonStr = JSON.stringify(sessionData);
+        const base64 = btoa(encodeURIComponent(jsonStr).replace(/%([0-9A-F]{2})/g, (match, p1) => {
+            return String.fromCharCode(parseInt(p1, 16));
+        }));
+
+        // Make it URL safe (Base64URL)
+        const token = base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
         const link = `${window.location.origin}/assessment/${token}`;
         setInviteLink(link);
         setStep('LINK');

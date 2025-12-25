@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { supabaseAdmin } from '@/lib/supabase';
 import { LLMRouter } from '@/lib/llm-router';
 
 export async function POST(req: NextRequest) {
@@ -8,24 +7,29 @@ export async function POST(req: NextRequest) {
         const { folder } = await req.json();
         if (!folder) return NextResponse.json({ error: 'Folder name is required' }, { status: 400 });
 
-        const sessionDir = path.join(process.cwd(), 'data', 'sessions', folder);
-        const reportPath = path.join(sessionDir, 'report.md');
-        const finalPath = path.join(sessionDir, 'final_feedback.json');
+        const reportStoragePath = `sessions/${folder}/report.md`;
+        const finalStoragePath = `sessions/${folder}/final_feedback.json`;
 
-        if (!fs.existsSync(reportPath)) {
-            return NextResponse.json({ error: 'Report not found' }, { status: 404 });
+        // 1. Read Report from Supabase
+        const { data: reportData, error: reportError } = await supabaseAdmin.storage
+            .from('assessment-data')
+            .download(reportStoragePath);
+
+        if (reportError) {
+            console.error('[Finalize API] Report download error:', reportError);
+            return NextResponse.json({ error: 'Report not found in cloud storage' }, { status: 404 });
         }
 
-        const reportContent = fs.readFileSync(reportPath, 'utf-8');
+        const reportContent = await reportData.text();
 
-        // Synthesis Logic
+        // 2. Synthesis Logic (LLM)
         const systemPrompt = "You are a Senior Delivery Manager at EPAM. Provide a final structured assessment based on an interview report.";
         const userPrompt = `
             Analyze this interview report and provide a high-level summary for the Delivery Manager.
             
             IMPORTANT: The report contains a "FINAL WORKSPACE CAPTURE" section. You MUST evaluate the quality, scalability, and correctness of the actual code or system design provided by the candidate in that section.
             
-            Focus on the following 4 areas:
+            Focus on the following  area:
             1. Overall Technical: Summary of technical competence across all rounds, including a critique of their final code/design implementation.
             2. Overall Behavioral: Soft skills, attitude, and fit.
             3. Overall Communication: Clarity, articulation, and interaction style.
@@ -51,7 +55,7 @@ export async function POST(req: NextRequest) {
 
         const { text } = await LLMRouter.generate(systemPrompt, userPrompt, 0.2);
 
-        // Clean and Parse
+        // Clean and Parse LLM Response
         let cleanJson = text;
         if (text.includes('```json')) {
             cleanJson = text.split('```json')[1].split('```')[0].trim();
@@ -61,8 +65,25 @@ export async function POST(req: NextRequest) {
 
         const summary = JSON.parse(cleanJson);
 
-        // Save to file
-        fs.writeFileSync(finalPath, JSON.stringify(summary, null, 2));
+        // 3. Save synthesis back to Supabase Storage
+        const { error: uploadError } = await supabaseAdmin.storage
+            .from('assessment-data')
+            .upload(finalStoragePath, JSON.stringify(summary, null, 2), {
+                contentType: 'application/json',
+                upsert: true
+            });
+
+        if (uploadError) throw uploadError;
+
+        // 4. Update Database to mark as finalized
+        const { error: dbError } = await supabaseAdmin
+            .from('assessment_sessions')
+            .update({ has_feedback: true })
+            .eq('session_id', folder);
+
+        if (dbError) {
+            console.warn('[Finalize API] Database update error:', dbError.message);
+        }
 
         return NextResponse.json(summary);
     } catch (error: any) {

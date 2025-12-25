@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { supabaseAdmin } from '@/lib/supabase';
 
 export async function GET(req: NextRequest) {
     try {
@@ -10,15 +9,20 @@ export async function GET(req: NextRequest) {
 
         if (!folder) return NextResponse.json({ error: 'Folder is required' }, { status: 400 });
 
-        const sessionDir = path.join(process.cwd(), 'data', 'sessions', folder);
-        const filePath = path.join(sessionDir, type === 'final' ? 'final_feedback.json' : 'report.md');
+        const fileName = type === 'final' ? 'final_feedback.json' : 'report.md';
+        const storagePath = `sessions/${folder}/${fileName}`;
 
-        if (!fs.existsSync(filePath)) {
+        const { data, error } = await supabaseAdmin.storage
+            .from('assessment-data')
+            .download(storagePath);
+
+        if (error) {
+            console.warn(`[Report API] File not found: ${storagePath}`);
             if (type === 'final') return NextResponse.json(null);
             return new Response('Report not found', { status: 404 });
         }
 
-        const content = fs.readFileSync(filePath, 'utf-8');
+        const content = await data.text();
 
         if (type === 'final') {
             return NextResponse.json(JSON.parse(content));
@@ -28,6 +32,7 @@ export async function GET(req: NextRequest) {
             headers: { 'Content-Type': 'text/markdown' }
         });
     } catch (error: any) {
+        console.error("Report API Error:", error);
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
 }
