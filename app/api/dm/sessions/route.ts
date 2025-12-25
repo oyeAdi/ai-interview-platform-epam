@@ -10,7 +10,7 @@ export async function GET() {
 
         if (error) throw error;
 
-        const formattedSessions = sessions.map(session => ({
+        const formattedSessions = (sessions || []).map((session: any) => ({
             id: session.session_id,
             folderName: session.session_id,
             date: session.created_at,
