@@ -42,16 +42,27 @@ export async function POST(req: NextRequest) {
         // 3. Upload Recording to Firebase
         let recordingUrl = '';
         if (recording) {
-            console.log(`[Archive] Uploading recording to Firebase: sessions/${sessionId}/recording.webm`);
-            const file = bucket.file(`sessions/${sessionId}/recording.webm`);
-            const buffer = Buffer.from(await recording.arrayBuffer());
+            if (!bucket) {
+                console.error('[Archive] Firebase bucket not initialized. Video upload skipped.');
+            } else {
+                console.log(`[Archive] Uploading recording to Firebase: sessions/${sessionId}/recording.webm`);
+                try {
+                    const file = bucket.file(`sessions/${sessionId}/recording.webm`);
+                    const buffer = Buffer.from(await recording.arrayBuffer());
 
-            await file.save(buffer, {
-                metadata: { contentType: 'video/webm' },
-                resumable: false // Better for small - medium files in serverless
-            });
+                    await file.save(buffer, {
+                        metadata: { contentType: 'video/webm' },
+                        resumable: false // Better for small - medium files in serverless
+                    });
 
-            recordingUrl = file.name; // Store the firestore path
+                    recordingUrl = file.name; // Store the firestore path
+                    console.log('[Archive] Firebase upload successful:', recordingUrl);
+                } catch (fbError: any) {
+                    console.error('[Archive] Firebase upload failed:', fbError.message);
+                    // We don't throw here to avoid failing the whole archive if only video fails?
+                    // Actually, for this POC, let's keep it optional or log heavily.
+                }
+            }
         }
 
         // 4. Save Metadata to Supabase DB
