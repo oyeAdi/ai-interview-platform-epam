@@ -6,7 +6,7 @@ import InterviewSession from '@/components/InterviewSession';
 import InterviewConfigurator from '@/components/InterviewConfigurator';
 import JobAdmin from '@/components/JobAdmin'; // Restored
 import { Message, JobDescription } from '@/types'; // Restored
-import { ChevronRight, CheckCircle, Settings, AlertCircle } from 'lucide-react'; // Restored
+import { ChevronRight, CheckCircle, Settings, AlertCircle, LayoutDashboard } from 'lucide-react'; // Restored
 import ReactMarkdown from 'react-markdown'; // Restored
 
 export default function Home() {
@@ -70,7 +70,7 @@ export default function Home() {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         messages: messages,
-                        summaries: [fullReport], // Pass current notes for synthesis
+                        summaries: summaries, // Use the structured summaries array
                         selectedJobId: selectedJob?.id,
                         type: 'feedback',
                     }),
@@ -218,6 +218,13 @@ export default function Home() {
                         </div>
                     </div>
                     <div className="flex items-center gap-4">
+                        <a
+                            href="/dashboard"
+                            className="p-3 text-gray-400 hover:text-[#0095A9] hover:bg-gray-50 rounded-full transition-all"
+                            title="DM Dashboard"
+                        >
+                            <LayoutDashboard size={20} />
+                        </a>
                         <button
                             onClick={() => setIsAdminOpen(true)}
                             className="p-3 text-gray-400 hover:text-[#0095A9] hover:bg-gray-50 rounded-full transition-all"

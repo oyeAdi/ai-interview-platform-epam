@@ -1,32 +1,50 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Clock, AlertCircle, Code, MessageSquare, Layout, ChevronRight, Play, Terminal, LogOut, CheckCircle, Smartphone, Monitor, ShieldCheck, Zap } from 'lucide-react';
+import { Send, Clock, AlertCircle, Code, MessageSquare, Layout, ChevronRight, Play, Terminal, LogOut, CheckCircle, Smartphone, Monitor, ShieldCheck, Zap, ListChecks } from 'lucide-react';
 import { Message } from '@/types';
 import clsx from 'clsx';
 
 interface InterviewSessionProps {
     selectedJobId: string;
-    customSkills?: string[]; // Added prop
+    customSkills?: string[];
+    candidateName?: string;
+    mode?: 'DM' | 'CANDIDATE';
+    config?: {
+        customInstructions: string;
+        durations: { mcq: number; conceptual: number; coding: number; systemDesign: number };
+        mcq: { enabled: boolean; maxQuestions: number };
+        conceptual?: { maxQuestions: number };
+        coding?: { enabled?: boolean; maxQuestions: number; focusAreas: string };
+        systemDesign?: { enabled?: boolean };
+    };
     onFinish: (transcript: Message[], summaries: string[], recordingBlob: Blob | null, fullReport: string) => void;
 }
 
-type Round = 'CONCEPTUAL' | 'CODING' | 'SYSTEM_DESIGN';
+type Round = 'MCQ' | 'CONCEPTUAL' | 'CODING' | 'SYSTEM_DESIGN';
 
-export default function InterviewSession({ selectedJobId, customSkills = [], onFinish }: InterviewSessionProps) {
+export default function InterviewSession({ selectedJobId, customSkills = [], candidateName = "Candidate", mode = 'DM', config, onFinish }: InterviewSessionProps) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [technicalReport, setTechnicalReport] = useState<string>('');
     const [input, setInput] = useState('');
     const [code, setCode] = useState('// Your code here...');
-    const [currentRound, setCurrentRound] = useState<Round>('CONCEPTUAL');
+    const [currentRound, setCurrentRound] = useState<Round>(config?.mcq?.enabled ? 'MCQ' : 'CONCEPTUAL');
     const [currentChallenge, setCurrentChallenge] = useState<string>('');
-    const [timeLeft, setTimeLeft] = useState(3 * 60); // 3 mins for conceptual
+    const [timeLeft, setTimeLeft] = useState((config?.durations?.mcq || 2) * 60);
     const [isActive, setIsActive] = useState(true);
     const [isLoading, setIsLoading] = useState(false);
     const [stream, setStream] = useState<MediaStream | null>(null);
     const [consoleOutput, setConsoleOutput] = useState('');
     const [isRunning, setIsRunning] = useState(false);
     const [currentQuestion, setCurrentQuestion] = useState('');
+    const [questionCount, setQuestionCount] = useState(0);
+    const [codingChallengeCount, setCodingChallengeCount] = useState(1);
+    const [roundSummaries, setRoundSummaries] = useState<Record<string, string[]>>({
+        'MCQ': [],
+        'CONCEPTUAL': [],
+        'CODING': [],
+        'SYSTEM_DESIGN': []
+    });
 
     const recorderRef = useRef<MediaRecorder | null>(null);
     const chunksRef = useRef<Blob[]>([]);
@@ -45,13 +63,22 @@ export default function InterviewSession({ selectedJobId, customSkills = [], onF
         messagesRef.current = messages;
     }, [messages]);
 
-    const triggerAI = async (customPrompt?: string, targetRound?: Round) => {
+    // Initialize Timer based on starting round
+    useEffect(() => {
+        if (config?.durations) {
+            const duration = config.durations[currentRound === 'MCQ' ? 'mcq' : currentRound === 'CONCEPTUAL' ? 'conceptual' : currentRound === 'CODING' ? 'coding' : 'systemDesign'] || 5;
+            setTimeLeft(duration * 60);
+        }
+    }, [currentRound, config]);
+
+    const triggerAI = async (customPrompt?: string, targetRound?: Round, isNewRound = false) => {
         setIsLoading(true);
-        const roundNum = (targetRound || currentRound) === 'CONCEPTUAL' ? 1 : (targetRound || currentRound) === 'CODING' ? 2 : 3;
+        const activeRound = targetRound || currentRound;
+        const roundNum = activeRound === 'MCQ' ? 0 : activeRound === 'CONCEPTUAL' ? 1 : activeRound === 'CODING' ? 2 : 3;
 
         const initialMessages = customPrompt
             ? [...messages, { role: 'user', text: customPrompt }]
-            : (messages.length > 0 ? messages : [{ role: 'user', text: 'Please start the round.' }]);
+            : (messages.length > 0 ? messages : [{ role: 'user', text: 'Start the interview.' }]);
 
         try {
             const res = await fetch('/api/interview', {
@@ -62,21 +89,34 @@ export default function InterviewSession({ selectedJobId, customSkills = [], onF
                     selectedJobId,
                     type: 'chat',
                     round: roundNum,
-                    customSkills, // Pass custom skills to API
-                    currentQuestion: messages.length > 0 ? currentQuestion : ""
+                    customSkills,
+                    isNewRound,
+                    currentQuestion: messages.length > 0 ? currentQuestion : "",
+                    customInstructions: config?.customInstructions, // Pass global instructions
+                    codingFocusAreas: config?.coding?.focusAreas
                 }),
             });
             const data = await res.json();
             if (data.text) {
                 setMessages((prev) => [...prev, { role: 'model', text: data.text }]);
+                // Update current question context for the next turn
+                setCurrentQuestion(data.text);
 
-                // Auto-Paste Boilerplate (Round 2)
+                // Increment question count if AI asks a new question
+                setQuestionCount(prev => prev + 1);
+
                 if (data.codeSnippet) {
                     setCode(data.codeSnippet);
                 }
 
                 if (data.candidateNote && data.candidateNote.trim().length > 5) {
-                    const roundTitle = (targetRound || currentRound).charAt(0) + (targetRound || currentRound).slice(1).toLowerCase().replace('_', ' ');
+                    const roundKey = activeRound === 'SYSTEM_DESIGN' ? 'SYSTEM_DESIGN' : activeRound;
+                    setRoundSummaries(prev => ({
+                        ...prev,
+                        [roundKey]: [...(prev[roundKey] || []), data.candidateNote]
+                    }));
+
+                    const roundTitle = activeRound.charAt(0) + activeRound.slice(1).toLowerCase().replace('_', ' ');
                     setTechnicalReport(prev => prev + `\n### ${roundTitle} - Note:\n- ${data.candidateNote}\n`);
                 }
             } else {
@@ -100,10 +140,11 @@ export default function InterviewSession({ selectedJobId, customSkills = [], onF
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     type: 'validate',
-                    selectedJobId, // Correctly passing the job ID
+                    selectedJobId,
                     code,
                     round: currentRound,
-                    currentQuestion: currentQuestion || "General implementation validation"
+                    currentQuestion: currentQuestion || "General implementation validation",
+                    customInstructions: config?.customInstructions
                 }),
             });
 
@@ -115,7 +156,6 @@ export default function InterviewSession({ selectedJobId, customSkills = [], onF
             const data = await res.json();
             setConsoleOutput(data.text || '> Evaluation complete. Logic looks sound.');
 
-            // Append detailed analysis to the technical report if available
             if (data.detailed_analysis) {
                 const phaseTitle = currentRound === 'SYSTEM_DESIGN' ? 'SYSTEM DESIGN' : 'CODING CHALLENGE';
                 setTechnicalReport(prev => prev + `\n\n### ${phaseTitle} - VALIDATION CHECK:\n${data.detailed_analysis}\n`);
@@ -129,16 +169,36 @@ export default function InterviewSession({ selectedJobId, customSkills = [], onF
 
     const stopRecordingAndGetBlob = () => {
         return new Promise<Blob | null>((resolve) => {
-            if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+            if (!recorderRef.current) {
+                // Safely stop tracks if recorder ref is gone
+                if (activeStreamsRef.current) {
+                    activeStreamsRef.current.forEach(s => s.getTracks().forEach(t => t.stop()));
+                    activeStreamsRef.current = [];
+                }
+                setStream(null);
+                resolve(null);
+                return;
+            }
+
+            const timeoutId = setTimeout(() => {
+                console.warn("Recording stop timeout - forcing finish");
+                resolve(null);
+            }, 2000);
+
+            if (recorderRef.current.state !== 'inactive') {
                 recorderRef.current.onstop = () => {
+                    clearTimeout(timeoutId);
                     const blob = new Blob(chunksRef.current, { type: 'video/webm' });
                     activeStreamsRef.current.forEach(s => s.getTracks().forEach(t => t.stop()));
+                    activeStreamsRef.current = [];
                     setStream(null);
                     resolve(blob);
                 };
                 recorderRef.current.stop();
             } else {
+                clearTimeout(timeoutId);
                 activeStreamsRef.current.forEach(s => s.getTracks().forEach(t => t.stop()));
+                activeStreamsRef.current = [];
                 setStream(null);
                 resolve(null);
             }
@@ -147,41 +207,114 @@ export default function InterviewSession({ selectedJobId, customSkills = [], onF
 
     const handleRoundTransition = async () => {
         setIsLoading(true);
-        if (currentRound === 'CONCEPTUAL') {
-            setCurrentRound('CODING');
-            setTimeLeft(5 * 60);
-            const transitionMsg = "Conceptual round completed. Transitioning to Round 2: Problem Solving & Coding.";
+        setQuestionCount(0); // Reset question count for next round
+
+        if (currentRound === 'MCQ') {
+            setCurrentRound('CONCEPTUAL');
+            const transitionMsg = "MCQ round complete. Transitioning to Round 2: Conceptual Deep Dive.";
             setMessages(prev => [...prev, { role: 'model', text: transitionMsg }]);
-            triggerAI('Round 2 starts now. Please provide a coding challenge.', 'CODING');
+            triggerAI('Transition to Conceptual Round. Ask the first conceptual question.', 'CONCEPTUAL', true);
+        } else if (currentRound === 'CONCEPTUAL') {
+            // Check if Coding is enabled
+            if (config?.coding?.enabled) {
+                setCurrentRound('CODING');
+                const transitionMsg = "Conceptual round complete. Transitioning to Round 3: Practical / Coding.";
+                setMessages(prev => [...prev, { role: 'model', text: transitionMsg }]);
+                triggerAI('Transition to Coding Round. Provide a new coding challenge.', 'CODING', true);
+            } else if (config?.systemDesign?.enabled) {
+                setCurrentRound('SYSTEM_DESIGN');
+                const transitionMsg = "Conceptual round complete. Transitioning to Round 4: Strategy / System Design.";
+                setMessages(prev => [...prev, { role: 'model', text: transitionMsg }]);
+                triggerAI('Transition to System Design Round. Provide a design scenario.', 'SYSTEM_DESIGN', true);
+            } else {
+                finishInterview();
+            }
         } else if (currentRound === 'CODING') {
-            setCurrentRound('SYSTEM_DESIGN');
-            setTimeLeft(5 * 60);
-            setCode('');
-            setCurrentChallenge('');
-            setConsoleOutput('');
-            const transitionMsg = "Coding round completed. Transitioning to Round 3: System Design.";
-            setMessages(prev => [...prev, { role: 'model', text: transitionMsg }]);
-            triggerAI('Round 3 starts now. Please provide a system design scenario.', 'SYSTEM_DESIGN');
+            const maxCodingQs = config?.coding?.maxQuestions || 1;
+            if (codingChallengeCount < maxCodingQs) {
+                // Stay in Coding Round, Next Question
+                setCodingChallengeCount(prev => prev + 1);
+
+                // --- ROLE AWARE PLACEHOLDER ---
+                const isNonTech = (selectedJobId || '').includes('pm') || (selectedJobId || '').includes('hr');
+                setCode(isNonTech ? 'Loading next case study...' : '// Next challenge loading...');
+
+                setConsoleOutput('');
+                const transitionMsg = `Coding Challenge ${codingChallengeCount} complete. Loading Challenge ${codingChallengeCount + 1}...`;
+                setMessages(prev => [...prev, { role: 'model', text: transitionMsg }]);
+                triggerAI(`Candidate finished question ${codingChallengeCount}. Move to Question ${codingChallengeCount + 1}. Provide a NEW and DIFFERENT coding problem than the previous ones.`, 'CODING', true);
+            } else {
+                // Check if System Design is enabled
+                if (config?.systemDesign?.enabled) {
+                    setCurrentRound('SYSTEM_DESIGN');
+                    setCode('');
+                    setCurrentChallenge('');
+                    setConsoleOutput('');
+                    const transitionMsg = "Coding round complete. Transitioning to Round 4: Strategy / System Design.";
+                    setMessages(prev => [...prev, { role: 'model', text: transitionMsg }]);
+                    triggerAI('Transition to System Design Round. Provide a design scenario.', 'SYSTEM_DESIGN', true);
+                } else {
+                    finishInterview();
+                }
+            }
         } else {
-            setIsActive(false);
-            const blob = await stopRecordingAndGetBlob();
-            onFinish(messagesRef.current, [], blob, technicalReport);
+            finishInterview();
         }
         setIsLoading(false);
+    };
+
+    const finishInterview = async () => {
+        setIsActive(false);
+        try {
+            const blob = await stopRecordingAndGetBlob();
+            // Consolidate round-wise summaries into a flat array for the feedback generator
+            const flatSummaries = Object.entries(roundSummaries).flatMap(([round, notes]) =>
+                notes.length > 0 ? [`### PHASE: ${round}`, ...notes] : []
+            );
+            onFinish(messagesRef.current, flatSummaries, blob, technicalReport);
+        } catch (e) {
+            console.error("Error during finish:", e);
+            const flatSummaries = Object.entries(roundSummaries).flatMap(([round, notes]) =>
+                notes.length > 0 ? [`### PHASE: ${round}`, ...notes] : []
+            );
+            onFinish(messagesRef.current, flatSummaries, null, technicalReport);
+        }
     };
 
     const handleFinishEarly = async () => {
         if (confirm('Are you finished with the entire interview? This will submit your session for a final report.')) {
             setIsActive(false);
-            const blob = await stopRecordingAndGetBlob();
-            onFinish(messagesRef.current, [], blob, technicalReport);
+            try {
+                const blob = await stopRecordingAndGetBlob();
+                onFinish(messagesRef.current, [], blob, technicalReport);
+            } catch (e) {
+                console.error("Error during finish:", e);
+                onFinish(messagesRef.current, [], null, technicalReport);
+            }
         }
     };
 
     const sendMessage = async () => {
         if (!input.trim() || isLoading || !isActive) return;
 
-        const roundNum = currentRound === 'CONCEPTUAL' ? 1 : currentRound === 'CODING' ? 2 : 3;
+        // Check Timer Lockdown
+        if (timeLeft <= 0) {
+            handleRoundTransition();
+            return;
+        }
+
+        // Check Max Questions Limit
+        let maxQs = 100;
+        if (currentRound === 'MCQ') maxQs = config?.mcq?.maxQuestions || 7;
+        if (currentRound === 'CONCEPTUAL') maxQs = config?.conceptual?.maxQuestions || 10;
+        if (currentRound === 'CODING') maxQs = (config?.coding?.maxQuestions || 1) * 3; // Allow some back-and-forth but cap it
+
+        if (questionCount >= maxQs) {
+            handleRoundTransition();
+            return;
+        }
+
+        const roundNum = currentRound === 'MCQ' ? 0 : currentRound === 'CONCEPTUAL' ? 1 : currentRound === 'CODING' ? 2 : 3;
         const userInput = currentRound === 'CODING' ? `[CODE SUBMISSION]\n${code}\n\n[FOLLOW-UP RESPONSE]\n${input}` : input;
 
         const newMsg: Message = { role: 'user', text: userInput };
@@ -199,18 +332,26 @@ export default function InterviewSession({ selectedJobId, customSkills = [], onF
                     selectedJobId,
                     type: 'chat',
                     round: roundNum,
-                    currentQuestion
+                    currentQuestion,
+                    customInstructions: config?.customInstructions
                 }),
             });
             const data = await res.json();
             if (data.text) {
                 setMessages((prev) => [...prev, { role: 'model', text: data.text }]);
+                setQuestionCount(prev => prev + 1);
 
                 if (data.codeSnippet) {
                     setCode(data.codeSnippet);
                 }
 
                 if (data.candidateNote && data.candidateNote.trim().length > 5) {
+                    const roundKey = currentRound === 'SYSTEM_DESIGN' ? 'SYSTEM_DESIGN' : currentRound;
+                    setRoundSummaries(prev => ({
+                        ...prev,
+                        [roundKey]: [...(prev[roundKey] || []), data.candidateNote]
+                    }));
+
                     const roundTitle = currentRound.charAt(0) + currentRound.slice(1).toLowerCase().replace('_', ' ');
                     setTechnicalReport(prev => prev + `\n### ${roundTitle} - Note:\n- ${data.candidateNote}\n`);
                 }
@@ -315,7 +456,6 @@ export default function InterviewSession({ selectedJobId, customSkills = [], onF
                 }
             }
 
-            // Fallback: If no structured problem block, use the conversational preamble
             if (!extracted && raw.length > 5) {
                 extracted = raw.split('```')[0].trim();
             }
@@ -325,10 +465,14 @@ export default function InterviewSession({ selectedJobId, customSkills = [], onF
                 setCurrentQuestion(cleanExtracted);
                 if (currentRound === 'CODING' || currentRound === 'SYSTEM_DESIGN') {
                     setCurrentChallenge(cleanExtracted);
-                    const header = currentRound === 'CODING' ? "CODE EDITOR" : "SYSTEM DESIGN WORKSPACE";
-                    const initialContent = `/*\n  ${header}\n  ---------------------------\n  TASK: ${cleanExtracted}\n*/\n\n` + (currentRound === 'CODING' ? "// Start coding here..." : "// Design your system here...");
+                    const isNonTech = (selectedJobId || '').includes('pm') || (selectedJobId || '').includes('hr');
+                    const header = currentRound === 'CODING' ? (isNonTech ? "STRATEGY WORKSPACE" : "CODE EDITOR") : (isNonTech ? "STRATEGY BLUEPRINT" : "SYSTEM DESIGN WORKSPACE");
 
-                    // Only set code if the editor is empty OR contains a previously generated task header
+                    const techHint = currentRound === 'CODING' ? "// Start coding here..." : "// Design your system here...";
+                    const nonTechHint = "Write your proposed strategy, action plan, and key considerations here...";
+
+                    const initialContent = `/*\n  ${header}\n  ---------------------------\n  TASK: ${cleanExtracted}\n*/\n\n` + (isNonTech ? nonTechHint : techHint);
+
                     if (!code || code.trim().length < 10 || code.startsWith('/*\n  CODE EDITOR') || code.startsWith('/*\n  SYSTEM DESIGN')) {
                         setCode(initialContent);
                     }
@@ -384,13 +528,15 @@ export default function InterviewSession({ selectedJobId, customSkills = [], onF
                         <div className="space-y-2 pt-6">
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2 mb-2">Stage</p>
                             {[
-                                { id: 'CONCEPTUAL', label: 'Conceptual', icon: MessageSquare },
-                                { id: 'CODING', label: 'Practical', icon: Code },
-                                { id: 'SYSTEM_DESIGN', label: 'Design', icon: Layout }
+                                { id: 'MCQ', label: 'Round 1: Screening', icon: ListChecks },
+                                { id: 'CONCEPTUAL', label: 'Round 2: Conceptual', icon: MessageSquare },
+                                { id: 'CODING', label: 'Round 3: Practical', icon: Code },
+                                { id: 'SYSTEM_DESIGN', label: 'Round 4: Design', icon: Layout }
                             ].map((stage) => (
                                 <div key={stage.id} className={clsx(
                                     "px-4 py-3 rounded-xl flex items-center gap-3 border transition-all duration-300",
-                                    currentRound === stage.id ? "bg-[#0095A9]/5 border-[#0095A9]/20 text-[#0095A9]" : "border-transparent text-slate-400"
+                                    currentRound === stage.id ? "bg-[#0095A9]/5 border-[#0095A9]/20 text-[#0095A9]" : "border-transparent text-slate-400",
+                                    (stage.id === 'MCQ' && (!config?.mcq?.enabled)) ? 'hidden' : ''
                                 )}>
                                     <stage.icon className={clsx("w-4 h-4", currentRound === stage.id ? "text-[#0095A9]" : "text-slate-200")} />
                                     <span className="text-xs font-bold">{stage.label}</span>
@@ -404,7 +550,7 @@ export default function InterviewSession({ selectedJobId, customSkills = [], onF
                                 disabled={isLoading}
                                 className="w-full flex items-center justify-center gap-2 px-4 py-4 bg-[#0095A9] hover:bg-[#008496] text-white rounded-2xl transition-all duration-300 font-bold text-xs uppercase tracking-widest shadow-lg shadow-[#0095A9]/20 group disabled:opacity-50"
                             >
-                                {currentRound === 'SYSTEM_DESIGN' ? 'Finish' : 'Next Stage'}
+                                {currentRound === 'SYSTEM_DESIGN' ? 'Finish' : (currentRound === 'CODING' && codingChallengeCount < (config?.coding?.maxQuestions || 1) ? 'Next Challenge' : 'Next Stage')}
                                 <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                             </button>
                         </div>
@@ -427,6 +573,10 @@ export default function InterviewSession({ selectedJobId, customSkills = [], onF
                             <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
                             <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Connected</span>
                         </div>
+                    </div>
+                    <div className="text-right">
+                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Questions</span>
+                        <p className="text-lg font-black text-[#0095A9]">{questionCount}</p>
                     </div>
                 </div>
 
@@ -481,8 +631,20 @@ export default function InterviewSession({ selectedJobId, customSkills = [], onF
 
                 <div className="p-6 bg-white border-t border-slate-100">
                     <div className="relative group">
-                        <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} placeholder="Share your thoughts..." className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 pr-16 text-sm text-slate-700 placeholder-slate-300 focus:outline-none focus:border-[#0095A9]/30 transition-all duration-500 resize-none min-h-[60px]" rows={1} />
-                        <button onClick={sendMessage} disabled={isLoading || !input.trim()} className="absolute right-3 top-1/2 -translate-y-1/2 p-3 bg-[#0095A9] text-white rounded-xl hover:bg-[#008496] disabled:opacity-30 disabled:hover:bg-[#0095A9] transition-all transform hover:scale-105 active:scale-95 shadow-md shadow-[#0095A9]/10">
+                        <textarea
+                            value={input}
+                            onChange={(e) => setInput(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+                            placeholder={timeLeft <= 0 ? "Time is up for this round." : "Share your thoughts..."}
+                            disabled={isLoading || !isActive || timeLeft <= 0}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 pr-16 text-sm text-slate-700 placeholder-slate-300 focus:outline-none focus:border-[#0095A9]/30 transition-all duration-500 resize-none min-h-[60px] disabled:opacity-50"
+                            rows={1}
+                        />
+                        <button
+                            onClick={sendMessage}
+                            disabled={isLoading || !input.trim() || timeLeft <= 0}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 p-3 bg-[#0095A9] text-white rounded-xl hover:bg-[#008496] disabled:opacity-30 disabled:hover:bg-[#0095A9] transition-all transform hover:scale-105 active:scale-95 shadow-md shadow-[#0095A9]/10"
+                        >
                             <Send className="w-4 h-4" />
                         </button>
                     </div>
@@ -491,15 +653,16 @@ export default function InterviewSession({ selectedJobId, customSkills = [], onF
 
             {/* Right (45%) - Workspace Panel */}
             <div className="w-[45%] h-full bg-[#F1F5F9] border-l border-slate-200 flex flex-col overflow-hidden">
-                {currentRound === 'CONCEPTUAL' ? (
+                {currentRound === 'MCQ' || currentRound === 'CONCEPTUAL' ? (
                     <div className="flex-1 flex flex-col items-center justify-center p-12 text-center space-y-8 animate-in fade-in duration-1000">
                         <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center shadow-xl shadow-slate-200/50">
                             <ShieldCheck className="w-10 h-10 text-[#0095A9]" />
                         </div>
                         <div>
-                            <h3 className="text-xl font-black text-slate-800 uppercase tracking-[0.2em] mb-4">Phase 01: Foundations</h3>
+                            <h3 className="text-xl font-black text-slate-800 uppercase tracking-[0.2em] mb-4">Round {currentRound === 'MCQ' ? '01' : '02'}: {currentRound === 'MCQ' ? 'Screening' : 'Conceptual'}</h3>
                             <p className="text-slate-500 text-sm leading-relaxed max-w-sm">
-                                We are evaluating core architectural patterns and conceptual depth. The technical workspace will activate during the practical assessment.
+                                {currentRound === 'MCQ' ? 'Rapid-fire validation of core concepts.' : 'Evaluating architectural patterns and conceptual depth.'}
+                                The technical workspace will activate during the practical assessment.
                             </p>
                         </div>
                         <div className="grid grid-cols-2 gap-4 w-full max-w-md pt-8 border-t border-slate-200">
@@ -524,7 +687,11 @@ export default function InterviewSession({ selectedJobId, customSkills = [], onF
                                     {currentRound === 'CODING' ? <Code className="w-4 h-4 text-slate-400" /> : <Layout className="w-4 h-4 text-slate-400" />}
                                 </div>
                                 <div className="flex flex-col">
-                                    <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">{currentRound === 'CODING' ? 'Logic Module' : 'System Blueprint'}</h3>
+                                    <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">
+                                        {currentRound === 'CODING'
+                                            ? ((selectedJobId || '').includes('pm') || (selectedJobId || '').includes('hr') ? 'Strategy Module' : 'Logic Module')
+                                            : ((selectedJobId || '').includes('pm') || (selectedJobId || '').includes('hr') ? 'Case Blueprint' : 'System Blueprint')}
+                                    </h3>
                                     <span className="text-[9px] text-slate-400 font-bold uppercase tracking-[0.2em] mt-0.5">Primary Workspace</span>
                                 </div>
                             </div>
@@ -553,7 +720,7 @@ export default function InterviewSession({ selectedJobId, customSkills = [], onF
                                         disabled={isRunning}
                                         className="px-4 py-1.5 bg-[#0095A9] hover:bg-[#008496] text-[10px] text-white font-black rounded-lg transition-all transform active:scale-95 uppercase tracking-widest disabled:opacity-50"
                                     >
-                                        {isRunning ? 'Analyzing...' : 'Execute Checks'}
+                                        {isRunning ? 'Analyzing...' : ((selectedJobId || '').includes('pm') || (selectedJobId || '').includes('hr') ? 'Evaluate Plan' : 'Execute Checks')}
                                     </button>
                                 </div>
                                 <div className="flex-1 p-5 font-mono text-xs text-green-400/90 overflow-y-auto scrollbar-thin scrollbar-thumb-white/10">

@@ -5,6 +5,7 @@ export interface JobDescription {
     must_have: string[];
     nice_to_have: string[];
     description: string;
+    category?: string;
 }
 
 export interface Question {

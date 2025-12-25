@@ -3,6 +3,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import { InterviewData, JobDescription } from '@/types';
 
+export const dynamic = 'force-dynamic';
+
 const DATA_PATH = path.join(process.cwd(), 'data', 'interview_config.json');
 
 async function getData(): Promise<InterviewData> {

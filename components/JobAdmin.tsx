@@ -66,9 +66,16 @@ export default function JobAdmin({ jobs, onUpdate, onClose }: JobAdminProps) {
         }
     };
 
+    // Group jobs by category
+    const categories = Array.from(new Set(jobs.map(j => j.category || 'Uncategorized')));
+    const groupedJobs = categories.reduce((acc, cat) => {
+        acc[cat] = jobs.filter(j => (j.category || 'Uncategorized') === cat);
+        return acc;
+    }, {} as Record<string, JobDescription[]>);
+
     return (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-3xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl animate-in zoom-in duration-300">
+            <div className="bg-white rounded-3xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl animate-in zoom-in duration-300">
                 <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-[#003040] text-white">
                     <div>
                         <h2 className="text-2xl font-black tracking-tight">Manage Job Descriptions</h2>
@@ -81,29 +88,33 @@ export default function JobAdmin({ jobs, onUpdate, onClose }: JobAdminProps) {
 
                 <div className="flex-1 overflow-y-auto p-8 flex gap-8">
                     {/* List */}
-                    <div className="w-1/3 space-y-3 border-r border-gray-100 pr-8">
+                    <div className="w-1/3 space-y-6 border-r border-gray-100 pr-8 overflow-y-auto max-h-[70vh]">
                         <button
-                            onClick={() => setEditingJob({ title: '', level: 'SDE-1', must_have: [], nice_to_have: [], description: '' })}
+                            onClick={() => setEditingJob({ title: '', level: 'SDE-1', category: 'Software Engineering', must_have: [], nice_to_have: [], description: '' })}
                             className="w-full flex items-center justify-center gap-2 py-4 border-2 border-dashed border-gray-200 rounded-2xl text-gray-400 hover:text-[#0095A9] hover:border-[#0095A9] hover:bg-[#0095A9]/5 transition-all font-bold text-sm"
                         >
                             <Plus size={18} /> Add New Job
                         </button>
-                        <div className="space-y-2 overflow-y-auto max-h-[500px]">
-                            {jobs.map(job => (
-                                <div
-                                    key={job.id}
-                                    className={`p-4 rounded-2xl border-2 cursor-pointer transition-all ${editingJob?.id === job.id ? 'border-[#0095A9] bg-[#0095A9]/5' : 'border-transparent bg-gray-50 hover:bg-gray-100'}`}
-                                    onClick={() => setEditingJob(job)}
-                                >
-                                    <div className="text-[10px] font-bold text-[#0095A9] uppercase mb-1">{job.level}</div>
-                                    <div className="font-bold text-sm truncate">{job.title}</div>
-                                </div>
-                            ))}
-                        </div>
+
+                        {Object.entries(groupedJobs).map(([category, categoryJobs]) => (
+                            <div key={category} className="space-y-2">
+                                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest px-2">{category}</h3>
+                                {categoryJobs.map(job => (
+                                    <div
+                                        key={job.id}
+                                        className={`p-4 rounded-2xl border-2 cursor-pointer transition-all ${editingJob?.id === job.id ? 'border-[#0095A9] bg-[#0095A9]/5' : 'border-transparent bg-gray-50 hover:bg-gray-100'}`}
+                                        onClick={() => setEditingJob(job)}
+                                    >
+                                        <div className="text-[10px] font-bold text-[#0095A9] uppercase mb-1">{job.level}</div>
+                                        <div className="font-bold text-sm truncate">{job.title}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        ))}
                     </div>
 
                     {/* Form */}
-                    <div className="flex-1">
+                    <div className="flex-1 overflow-y-auto max-h-[70vh] pr-2">
                         {editingJob ? (
                             <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
                                 <div className="grid grid-cols-2 gap-4">
@@ -119,18 +130,36 @@ export default function JobAdmin({ jobs, onUpdate, onClose }: JobAdminProps) {
                                     </div>
                                     <div className="space-y-2">
                                         <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Level</label>
-                                        <select
+                                        <input
+                                            type="text"
                                             value={editingJob.level}
                                             onChange={e => setEditingJob({ ...editingJob, level: e.target.value })}
                                             className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 focus:ring-2 focus:ring-[#0095A9]/20"
-                                        >
-                                            <option value="Intern">Intern</option>
-                                            <option value="SDE-1">SDE-1</option>
-                                            <option value="SDE-2">SDE-2</option>
-                                            <option value="SDE-3">SDE-3</option>
-                                            <option value="Lead">Lead</option>
-                                            <option value="Staff">Staff</option>
-                                        </select>
+                                            placeholder="e.g. SDE-2, Manager, CFO"
+                                        />
+                                        <p className="text-[10px] text-gray-400">Can be anything (e.g. Intern, CFO, Lead)</p>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Category / Industry</label>
+                                    <div className="relative">
+                                        <input
+                                            type="text"
+                                            list="category-suggestions"
+                                            value={editingJob.category || ''}
+                                            onChange={e => setEditingJob({ ...editingJob, category: e.target.value })}
+                                            className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 focus:ring-2 focus:ring-[#0095A9]/20"
+                                            placeholder="e.g. Software Engineering, Marketing, Finance"
+                                        />
+                                        <datalist id="category-suggestions">
+                                            {categories.map(cat => (
+                                                <option key={cat} value={cat} />
+                                            ))}
+                                            <option value="Marketing" />
+                                            <option value="Finance" />
+                                            <option value="Human Resources" />
+                                        </datalist>
                                     </div>
                                 </div>
 
@@ -151,7 +180,7 @@ export default function JobAdmin({ jobs, onUpdate, onClose }: JobAdminProps) {
                                         value={editingJob.must_have?.join(', ')}
                                         onChange={e => setEditingJob({ ...editingJob, must_have: e.target.value.split(',').map(s => s.trim()) })}
                                         className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 focus:ring-2 focus:ring-[#0095A9]/20"
-                                        placeholder="Java, SQL, REST APIs..."
+                                        placeholder="Skill 1, Skill 2..."
                                     />
                                 </div>
 
@@ -162,7 +191,7 @@ export default function JobAdmin({ jobs, onUpdate, onClose }: JobAdminProps) {
                                         value={editingJob.nice_to_have?.join(', ')}
                                         onChange={e => setEditingJob({ ...editingJob, nice_to_have: e.target.value.split(',').map(s => s.trim()) })}
                                         className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 focus:ring-2 focus:ring-[#0095A9]/20"
-                                        placeholder="Docker, Redis, Kafka..."
+                                        placeholder="Skill 1, Skill 2..."
                                     />
                                 </div>
 

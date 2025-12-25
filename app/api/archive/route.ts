@@ -35,6 +35,20 @@ export async function POST(req: NextRequest) {
             fs.writeFileSync(path.join(sessionDir, 'recording.webm'), buffer);
         }
 
+        // 4. Save Metadata
+        const candidateName = formData.get('candidateName') as string || 'Unknown Candidate';
+        const candidateEmail = formData.get('candidateEmail') as string || '';
+
+        const metadata = {
+            id: sessionFolderName,
+            jobId,
+            date: new Date().toISOString(),
+            candidateName,
+            candidateEmail,
+            timestamp
+        };
+        fs.writeFileSync(path.join(sessionDir, 'metadata.json'), JSON.stringify(metadata, null, 2));
+
         return NextResponse.json({
             success: true,
             folder: `data/sessions/${sessionFolderName}`

@@ -4,6 +4,7 @@
             "id": "intern",
             "level": "Intern",
             "title": "Software Engineer Intern - University Ops",
+            "category": "Software Engineering",
             "must_have": [
                 "Currently pursuing CS degree",
                 "Proficiency in one: Python, Java, or Go",
@@ -21,6 +22,7 @@
             "id": "sde1",
             "level": "SDE-1",
             "title": "Backend Engineer - Fulfillment Core",
+            "category": "Software Engineering",
             "must_have": [
                 "Java or Go",
                 "SQL",
@@ -38,6 +40,7 @@
             "id": "sde2",
             "level": "SDE-2",
             "title": "Software Engineer II - Payments Ledger",
+            "category": "Software Engineering",
             "must_have": [
                 "Golang",
                 "Distributed Systems",
@@ -56,6 +59,7 @@
             "id": "sde3",
             "level": "SDE-3",
             "title": "Senior Engineer - Marketplace Dynamics",
+            "category": "Software Engineering",
             "must_have": [
                 "System Design (High-Scale)",
                 "Go/Java",
@@ -74,6 +78,7 @@
             "id": "lead",
             "level": "Lead Engineer",
             "title": "Tech Lead - Rider Experience",
+            "category": "Software Engineering",
             "must_have": [
                 "Architecture Design",
                 "Stakeholder Management",
@@ -92,6 +97,7 @@
             "id": "staff",
             "level": "Staff Engineer",
             "title": "Staff Engineer - Infrastructure & Storage",
+            "category": "Software Engineering",
             "must_have": [
                 "C++/Go",
                 "Consensus Algorithms (Raft/Paxos)",
@@ -104,6 +110,60 @@
                 "Kernel-level tuning"
             ],
             "description": "Architecting the global backbone of Uber's infrastructure. Impacting cross-org initiatives."
+        },
+        {
+            "id": "mkt-mgr",
+            "level": "Manager",
+            "title": "Digital Marketing Manager",
+            "category": "Marketing",
+            "must_have": [
+                "SEO/SEM Mastery",
+                "Google Analytics",
+                "Content Strategy",
+                "Social Media Advertising"
+            ],
+            "nice_to_have": [
+                "Graphic Design (Canva/Adobe)",
+                "Copywriting",
+                "Video Editing Basics"
+            ],
+            "description": "Lead our digital presence. You will drive growth through targeted campaigns and organic content strategies across all major platforms."
+        },
+        {
+            "id": "hr_manager",
+            "level": "Manager",
+            "title": "HR Manager - People Operations",
+            "category": "Human Resources",
+            "must_have": [
+                "Employee Relations",
+                "Conflict Resolution",
+                "Labor Laws & Compliance",
+                "Performance Management"
+            ],
+            "nice_to_have": [
+                "HR Analytics",
+                "Diversity & Inclusion Strategy",
+                "Change Management"
+            ],
+            "description": "Lead people operations and culture initiatives. You will handle complex employee relations cases and drive strategic HR programs."
+        },
+        {
+            "id": "pm_admin",
+            "level": "Project Manager",
+            "title": "Project Manager - Admin Control Plane",
+            "category": "Project Management",
+            "must_have": [
+                "Agile/Scrum Methodologies",
+                "Stakeholder Management",
+                "JIRA/Confluence Mastery",
+                "Technical Roadmap Planning"
+            ],
+            "nice_to_have": [
+                "PMP Certification",
+                "Experience with Internal Tools",
+                "Basic SQL/Data Analysis"
+            ],
+            "description": "Oversee the delivery of critical internal tools and admin control planes. You will coordinate between engineering, product, and operations to ensure seamless execution."
         }
     ],
     "question_bank": [
