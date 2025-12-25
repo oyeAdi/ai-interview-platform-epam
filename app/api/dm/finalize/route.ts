@@ -22,8 +22,11 @@ export async function POST(req: NextRequest) {
         const systemPrompt = "You are a Senior Delivery Manager at EPAM. Provide a final structured assessment based on an interview report.";
         const userPrompt = `
             Analyze this interview report and provide a high-level summary for the Delivery Manager.
+            
+            IMPORTANT: The report contains a "FINAL WORKSPACE CAPTURE" section. You MUST evaluate the quality, scalability, and correctness of the actual code or system design provided by the candidate in that section.
+            
             Focus on the following 4 areas:
-            1. Overall Technical: Summary of technical competence across all rounds.
+            1. Overall Technical: Summary of technical competence across all rounds, including a critique of their final code/design implementation.
             2. Overall Behavioral: Soft skills, attitude, and fit.
             3. Overall Communication: Clarity, articulation, and interaction style.
             4. Overall Feedback: Summarized Strengths and Areas of Improvement.
@@ -40,6 +43,7 @@ export async function POST(req: NextRequest) {
                     "strengths": ["...", "..."],
                     "improvements": ["...", "..."]
                 },
+                "overall_summary": "A 2-sentence executive summary of the candidate's performance...",
                 "verdict": "Hired / Not Hired",
                 "reason": "Brief reason..."
             }

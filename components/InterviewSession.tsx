@@ -246,6 +246,9 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
             } else {
                 // Check if System Design is enabled
                 if (config?.systemDesign?.enabled) {
+                    // CAPTURE CODING WORKSPACE BEFORE MOVING
+                    setTechnicalReport(prev => prev + `\n\n## FINAL CODING WORKSPACE CAPTURE\n\`\`\`\n${code}\n\`\`\`\n`);
+
                     setCurrentRound('SYSTEM_DESIGN');
                     setCode('');
                     setCurrentChallenge('');
@@ -267,11 +270,19 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
         setIsActive(false);
         try {
             const blob = await stopRecordingAndGetBlob();
+
+            // Append the final round's workspace state to the report
+            // Only if it's a workspace-enabled round and has content
+            let finalConsolidatedReport = technicalReport;
+            if ((currentRound === 'CODING' || currentRound === 'SYSTEM_DESIGN') && code.trim().length > 50) {
+                finalConsolidatedReport += `\n\n## FINAL ${currentRound} WORKSPACE CAPTURE\n\`\`\`\n${code}\n\`\`\`\n`;
+            }
+
             // Consolidate round-wise summaries into a flat array for the feedback generator
             const flatSummaries = Object.entries(roundSummaries).flatMap(([round, notes]) =>
                 notes.length > 0 ? [`### PHASE: ${round}`, ...notes] : []
             );
-            onFinish(messagesRef.current, flatSummaries, blob, technicalReport);
+            onFinish(messagesRef.current, flatSummaries, blob, finalConsolidatedReport);
         } catch (e) {
             console.error("Error during finish:", e);
             const flatSummaries = Object.entries(roundSummaries).flatMap(([round, notes]) =>
@@ -286,7 +297,11 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
             setIsActive(false);
             try {
                 const blob = await stopRecordingAndGetBlob();
-                onFinish(messagesRef.current, [], blob, technicalReport);
+                let finalConsolidatedReport = technicalReport;
+                if ((currentRound === 'CODING' || currentRound === 'SYSTEM_DESIGN') && code.trim().length > 50) {
+                    finalConsolidatedReport += `\n\n## FINAL ${currentRound} WORKSPACE CAPTURE\n\`\`\`\n${code}\n\`\`\`\n`;
+                }
+                onFinish(messagesRef.current, [], blob, finalConsolidatedReport);
             } catch (e) {
                 console.error("Error during finish:", e);
                 onFinish(messagesRef.current, [], null, technicalReport);
@@ -294,8 +309,9 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
         }
     };
 
-    const sendMessage = async () => {
-        if (!input.trim() || isLoading || !isActive) return;
+    const sendMessage = async (messageOverride?: string) => {
+        const messageToSend = messageOverride || input;
+        if (!messageToSend.trim() || isLoading || !isActive) return;
 
         // Check Timer Lockdown
         if (timeLeft <= 0) {
@@ -315,7 +331,9 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
         }
 
         const roundNum = currentRound === 'MCQ' ? 0 : currentRound === 'CONCEPTUAL' ? 1 : currentRound === 'CODING' ? 2 : 3;
-        const userInput = currentRound === 'CODING' ? `[CODE SUBMISSION]\n${code}\n\n[FOLLOW-UP RESPONSE]\n${input}` : input;
+        const userInput = (currentRound === 'CODING' || currentRound === 'SYSTEM_DESIGN')
+            ? `[${currentRound} SUBMISSION]\n${code}\n\n[FOLLOW-UP RESPONSE]\n${messageToSend}`
+            : messageToSend;
 
         const newMsg: Message = { role: 'user', text: userInput };
         const newHistory = [...messages, newMsg];
@@ -635,19 +653,41 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
                             value={input}
                             onChange={(e) => setInput(e.target.value)}
                             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-                            placeholder={timeLeft <= 0 ? "Time is up for this round." : "Share your thoughts..."}
+                            placeholder={timeLeft <= 0 ? "Time is up for this round." : currentRound === 'MCQ' ? "Select an answer below or type here" : "Share your thoughts..."}
                             disabled={isLoading || !isActive || timeLeft <= 0}
                             className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 pr-16 text-sm text-slate-700 placeholder-slate-300 focus:outline-none focus:border-[#0095A9]/30 transition-all duration-500 resize-none min-h-[60px] disabled:opacity-50"
                             rows={1}
                         />
                         <button
-                            onClick={sendMessage}
+                            onClick={() => sendMessage()}
                             disabled={isLoading || !input.trim() || timeLeft <= 0}
                             className="absolute right-3 top-1/2 -translate-y-1/2 p-3 bg-[#0095A9] text-white rounded-xl hover:bg-[#008496] disabled:opacity-30 disabled:hover:bg-[#0095A9] transition-all transform hover:scale-105 active:scale-95 shadow-md shadow-[#0095A9]/10"
                         >
                             <Send className="w-4 h-4" />
                         </button>
                     </div>
+
+                    {/* MCQ Answer Buttons */}
+                    {currentRound === 'MCQ' && (
+                        <div className="mt-4 flex items-center gap-3">
+                            <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Quick Answer:</span>
+                            {['A', 'B', 'C', 'D'].map((option) => (
+                                <button
+                                    key={option}
+                                    onClick={() => {
+                                        setInput(option);
+                                    }}
+                                    disabled={isLoading || timeLeft <= 0}
+                                    className={`px-6 py-3 font-black text-sm rounded-xl disabled:opacity-30 transition-all transform hover:scale-105 active:scale-95 shadow-sm ${input === option
+                                            ? 'bg-[#0095A9] text-white border-2 border-[#0095A9]'
+                                            : 'bg-white border-2 border-slate-200 text-slate-700 hover:border-[#0095A9] hover:bg-[#0095A9]/5 hover:text-[#0095A9]'
+                                        }`}
+                                >
+                                    {option}
+                                </button>
+                            ))}
+                        </div>
+                    )}
                 </div>
             </div>
 
