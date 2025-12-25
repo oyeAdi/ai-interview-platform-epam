@@ -44,9 +44,9 @@ export async function POST(req: NextRequest) {
             if (data) reportUrl = data.path;
         }
 
-        // 3. Upload Recording to Firebase
-        let recordingUrl = '';
-        if (recording) {
+        // 3. Handle Recording (Either directly uploaded by client or as a Blob)
+        let recordingUrl = formData.get('recordingPath') as string || '';
+        if (!recordingUrl && recording) {
             if (!bucket) {
                 console.error('[Archive] Firebase bucket not initialized. Video upload skipped.');
             } else {
@@ -57,17 +57,17 @@ export async function POST(req: NextRequest) {
 
                     await file.save(buffer, {
                         metadata: { contentType: 'video/webm' },
-                        resumable: false // Better for small - medium files in serverless
+                        resumable: false
                     });
 
-                    recordingUrl = file.name; // Store the firestore path
-                    console.log('[Archive] Firebase upload successful:', recordingUrl);
+                    recordingUrl = file.name;
+                    console.log('[Archive] Firebase upload successful (vía Admin SDK):', recordingUrl);
                 } catch (fbError: any) {
                     console.error('[Archive] Firebase upload failed:', fbError.message);
-                    // We don't throw here to avoid failing the whole archive if only video fails?
-                    // Actually, for this POC, let's keep it optional or log heavily.
                 }
             }
+        } else if (recordingUrl) {
+            console.log('[Archive] Using client-uploaded recording path:', recordingUrl);
         }
 
         // 4. Save Metadata to Supabase DB

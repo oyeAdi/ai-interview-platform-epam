@@ -65,19 +65,53 @@ export default function AssessmentLanding() {
 
     const handleFinish = async (messages: any[], summaries: string[], recordingBlob: Blob | null, fullReport: string) => {
         setCompleted(true);
-        // Fire and forget archive for candidate
         try {
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const jobId = tokenData?.jobId || 'unknown';
+            const sessionId = `session_${jobId}_${timestamp}`;
+            let recordingPath = '';
+
+            // 1. Direct Upload to Firebase if recording exists
+            if (recordingBlob) {
+                try {
+                    console.log('[Assessment] Requesting signed upload URL...');
+                    const fileName = `sessions/${sessionId}/recording.webm`;
+                    const urlRes = await fetch('/api/archive/upload-url', {
+                        method: 'POST',
+                        body: JSON.stringify({ fileName, contentType: 'video/webm' }),
+                    });
+
+                    if (!urlRes.ok) throw new Error('Failed to get upload URL');
+                    const { url } = await urlRes.json();
+
+                    console.log('[Assessment] Uploading video directly to Firebase...');
+                    const uploadRes = await fetch(url, {
+                        method: 'PUT',
+                        body: recordingBlob,
+                        headers: { 'Content-Type': 'video/webm' }
+                    });
+
+                    if (!uploadRes.ok) throw new Error('Direct upload failed');
+                    recordingPath = fileName;
+                    console.log('[Assessment] Direct upload successful!');
+                } catch (uploadErr) {
+                    console.error('[Assessment] Video upload failed, proceeding with metadata only', uploadErr);
+                }
+            }
+
+            // 2. Send Metadata to Archive API (No large blob here!)
             const formData = new FormData();
             formData.append('transcript', JSON.stringify(messages, null, 2));
             formData.append('report', fullReport);
-            if (recordingBlob) {
-                formData.append('recording', recordingBlob, 'recording.webm');
-            }
-            formData.append('jobId', tokenData?.jobId || 'unknown');
+            formData.append('jobId', jobId);
+            formData.append('timestamp', timestamp);
             formData.append('candidateName', tokenData?.candidateName || 'Unknown');
             formData.append('candidateEmail', tokenData?.candidateEmail || '');
+            if (recordingPath) {
+                formData.append('recordingPath', recordingPath);
+            }
 
-            // Let's rely on standard archive.
+            console.log('[Assessment] Archiving session metadata...');
             await fetch('/api/archive', {
                 method: 'POST',
                 body: formData,
