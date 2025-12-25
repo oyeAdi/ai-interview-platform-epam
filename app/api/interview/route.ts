@@ -79,16 +79,29 @@ export async function POST(req: NextRequest) {
         if (type === 'feedback') {
             const systemPrompt = "You are a Senior Technical Recruiter at EPAM. Provide a final hiring verdict based on technical notes.";
             const userPrompt = `
-                Review these candidate micro-evaluation notes and provide a final verdict (Hired/Not Hired) and a quick overall summary.
+                Review these candidate micro-evaluation notes and provide a comprehensive final report.
                 
                 Round-by-Round Notes:
                 ${summaries?.join('\n\n')}
                 
                 Format (Markdown):
+                ## Technical Evaluation
+                (Detailed assessment of technical skills, coding ability, and problem-solving)
+
+                ## Behavioral Assessment
+                (Assessment of soft skills, attitude, and cultural fit based on interactions)
+
+                ## Communication
+                (Clarity of thought, articulation, and interaction style)
+
+                ## Feedback
+                ### Strengths
+                - (Bulleted list)
+                ### Areas of Improvement
+                - (Bulleted list)
+
                 ## Final Verdict
-                (Hired/Not Hired) - Reason
-                ## Overall Summary
-                (2 sentences)
+                (Hired/Not Hired) - Brief Reason
             `;
 
             let report = "Summary generation failed.";
@@ -104,37 +117,56 @@ export async function POST(req: NextRequest) {
 
         // 2. Dynamic Code/Design Validation
         if (type === 'validate') {
-            const systemPrompt = `You are a high-performance terminal diagnostic engine.
-             RULES:
-             1. Respond ONLY as a terminal (prefixed with '> ').
-             2. Be technically accurate.
-             3. End with "COMPILATION SUCCESSFUL" or "ARCHITECTURE VALIDATED".`;
+            const isSystemDesign = round === 'SYSTEM_DESIGN' || round === 3;
+
+            const systemPrompt = isSystemDesign
+                ? `You are a Principal Software Architect and System Validator.
+                   RULES:
+                   1. Respond ONLY in strict JSON format.
+                   2. Analyze the design for scalability, reliability, and feasibility.
+                   3. NO CODE SOLUTIONS. ONLY ARCHITECTURAL FEEDBACK.`
+                : `You are a High-Performance Terminal Compiler & Diagnostic Engine.
+                   RULES:
+                   1. Respond ONLY in strict JSON format.
+                   2. Be technically accurate.
+                   3. NO CODE SOLUTIONS. ONLY COMPILER/RUNTIME FEEDBACK.`;
 
             const userPrompt = `
                 Analyze the following candidate submission.
-                Phase: ${round}
-                Goal: Provide a concise, professional technical critique for a terminal output.
+                Phase: ${isSystemDesign ? 'SYSTEM DESIGN' : 'CODING'}
                 Context: ${currentQuestion}
                 Submission: ${code}
+
+                Task:
+                1. "terminal_output": A concise, ${isSystemDesign ? 'architectural' : 'terminal-like'} status message (e.g., "Compiling...", "Verifying Schema...", "SUCCESS", "ERROR: O(n^2) detected").
+                2. "detailed_analysis": A deep-dive technical breakdown in Markdown (Strengths, Weaknesses, Edge Cases). This is for the internal report.
+
+                STRICT JSON FORMAT:
+                {
+                    "terminal_output": "> [Status Code] ...",
+                    "detailed_analysis": "## Analysis..."
+                }
             `;
 
-            let validationText;
             try {
-                const { text, provider } = await LLMRouter.generate(systemPrompt, userPrompt, 0.1);
+                const { text, provider } = await LLMRouter.generate(systemPrompt, userPrompt, 0.2);
                 console.log(`DEBUG: Validation generated via ${provider}`);
-                validationText = text;
+
+                let cleanJson = text.replace(/```json|```/gi, '').trim();
+                const parsed = JSON.parse(cleanJson);
+
+                return NextResponse.json({
+                    text: parsed.terminal_output || "> System validated.",
+                    detailed_analysis: parsed.detailed_analysis || ""
+                });
+
             } catch (err) {
                 console.error("Failed to validate via Router", err);
-                return NextResponse.json({ text: "> Internal Diagnostics Error.\n> AI Engine returned null. Please re-run check." });
+                return NextResponse.json({
+                    text: "> Internal Diagnostics Error.\n> AI Engine returned invalid format.",
+                    detailed_analysis: ""
+                });
             }
-
-            if (!validationText) {
-                return NextResponse.json({ text: "> Internal Diagnostics Error.\n> AI Engine returned null. Please re-run check." });
-            }
-
-            // Cleanup any markdown blocks if the AI tried to be smart
-            validationText = validationText.replace(/```[a-z]*|```/gi, '').trim();
-            return NextResponse.json({ text: validationText });
         }
 
         // 3. Chat Mode with High-Density Micro-Evaluations using LLMRouter

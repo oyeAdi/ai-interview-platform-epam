@@ -114,6 +114,12 @@ export default function InterviewSession({ selectedJobId, customSkills = [], onF
 
             const data = await res.json();
             setConsoleOutput(data.text || '> Evaluation complete. Logic looks sound.');
+
+            // Append detailed analysis to the technical report if available
+            if (data.detailed_analysis) {
+                const phaseTitle = currentRound === 'SYSTEM_DESIGN' ? 'SYSTEM DESIGN' : 'CODING CHALLENGE';
+                setTechnicalReport(prev => prev + `\n\n### ${phaseTitle} - VALIDATION CHECK:\n${data.detailed_analysis}\n`);
+            }
         } catch (err: any) {
             setConsoleOutput(`> ERROR: Verification process interrupted.\n> Reason: ${err.message || 'Unknown network failure.'}\n> Please try again in 5 seconds.`);
         } finally {
