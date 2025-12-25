@@ -1,5 +1,7 @@
 import * as admin from 'firebase-admin';
 
+// Vercel Redeploy Trigger: Adding verbose logging for production debugging.
+
 const isFirebaseConfigured = !!(process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY);
 
 if (isFirebaseConfigured && !admin.apps.length) {
