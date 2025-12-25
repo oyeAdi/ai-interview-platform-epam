@@ -7,6 +7,11 @@ export async function GET(req: NextRequest) {
         return new NextResponse("Folder required", { status: 400 });
     }
 
+    if (!bucket) {
+        console.error("[Video API] Firebase bucket not initialized");
+        return new NextResponse("Cloud storage not initialized", { status: 500 });
+    }
+
     try {
         // Firebase path: sessions/{folder}/recording.webm
         const file = bucket.file(`sessions/${folder}/recording.webm`);
