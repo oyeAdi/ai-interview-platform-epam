@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export async function GET(req: NextRequest) {
+    if (!supabaseAdmin) {
+        console.error('[Report API] Supabase Admin not initialized');
+        return NextResponse.json({ error: 'Supabase configuration missing' }, { status: 500 });
+    }
+
     try {
         const { searchParams } = new URL(req.url);
         const folder = searchParams.get('folder');

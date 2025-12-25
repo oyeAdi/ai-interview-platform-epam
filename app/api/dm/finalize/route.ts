@@ -3,6 +3,11 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { LLMRouter } from '@/lib/llm-router';
 
 export async function POST(req: NextRequest) {
+    if (!supabaseAdmin) {
+        console.error('[Finalize API] Supabase Admin not initialized');
+        return NextResponse.json({ error: 'Supabase configuration missing' }, { status: 500 });
+    }
+
     try {
         const { folder } = await req.json();
         if (!folder) return NextResponse.json({ error: 'Folder name is required' }, { status: 400 });

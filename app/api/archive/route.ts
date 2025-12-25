@@ -3,6 +3,11 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { bucket } from '@/lib/firebase-admin';
 
 export async function POST(req: NextRequest) {
+    if (!supabaseAdmin) {
+        console.error('[Archive API] Supabase Admin not initialized');
+        return NextResponse.json({ error: 'Supabase configuration missing' }, { status: 500 });
+    }
+
     try {
         const formData = await req.formData();
         const transcript = formData.get('transcript') as string;

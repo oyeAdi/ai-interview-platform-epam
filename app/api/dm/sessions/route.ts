@@ -2,6 +2,11 @@ import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export async function GET() {
+    if (!supabaseAdmin) {
+        console.error("[Sessions API] Supabase Admin not initialized. Check your environment variables.");
+        return NextResponse.json({ sessions: [], error: "Supabase not configured" });
+    }
+
     try {
         const { data: sessions, error } = await supabaseAdmin
             .from('assessment_sessions')
