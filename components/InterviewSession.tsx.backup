@@ -224,7 +224,6 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
                 triggerAI('Transition to Coding Round. Provide a new coding challenge.', 'CODING', true);
             } else if (config?.systemDesign?.enabled) {
                 setCurrentRound('SYSTEM_DESIGN');
-                setCodingChallengeCount(1);
                 const transitionMsg = "Conceptual round complete. Transitioning to Round 4: Strategy / System Design.";
                 setMessages(prev => [...prev, { role: 'model', text: transitionMsg }]);
                 triggerAI('Transition to System Design Round. Provide a design scenario.', 'SYSTEM_DESIGN', true);
@@ -241,7 +240,6 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
                 setCode('');
                 setCurrentChallenge('');
                 setConsoleOutput('');
-                setCodingChallengeCount(1);
                 const transitionMsg = "Coding round complete. Transitioning to Round 4: Strategy / System Design.";
                 setMessages(prev => [...prev, { role: 'model', text: transitionMsg }]);
                 triggerAI('Transition to System Design Round. Provide a design scenario.', 'SYSTEM_DESIGN', true);
@@ -315,7 +313,9 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
 
 
         const roundNum = currentRound === 'MCQ' ? 0 : currentRound === 'CONCEPTUAL' ? 1 : currentRound === 'CODING' ? 2 : 3;
-        const userInput = messageToSend;
+        const userInput = (currentRound === 'CODING' || currentRound === 'SYSTEM_DESIGN')
+            ? `[${currentRound} SUBMISSION]\n${code}\n\n[FOLLOW-UP RESPONSE]\n${messageToSend}`
+            : messageToSend;
 
         const newMsg: Message = { role: 'user', text: userInput };
         const newHistory = [...messages, newMsg];
@@ -720,7 +720,6 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
                                         if (currentRound === 'CODING' || currentRound === 'SYSTEM_DESIGN') {
                                             setCode('');
                                             setConsoleOutput('');
-                                            setCodingChallengeCount(prev => prev + 1);
                                             sendMessage('NEXT CHALLENGE: Please provide a NEW coding problem with Title, Description, Example Input/Output, Constraints, and starter code. Do NOT ask follow-up questions about the previous problem.');
                                         } else {
                                             setInput('');
@@ -740,92 +739,41 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
 
             {/* Right (45%) - Workspace Panel */}
             <div className="w-[45%] h-full bg-[#F1F5F9] border-l border-slate-200 flex flex-col overflow-hidden">
-                <div className="flex-1 flex flex-col p-8 space-y-6 overflow-y-auto">
-                    {/* Progress Tracker - Always Visible */}
-                    <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
-                        <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-xs font-black text-[#0095A9] uppercase tracking-widest">
-                                {currentRound === 'MCQ' ? 'Round 1: Screening' :
-                                    currentRound === 'CONCEPTUAL' ? 'Round 2: Conceptual' :
-                                        currentRound === 'CODING' ? 'Round 3: Practical Coding' : 'Round 4: System Design'}
-                            </h3>
-                            <div className="flex items-center gap-2">
-                                <Clock className="w-4 h-4 text-slate-400" />
-                                <span className="text-sm font-bold text-slate-600">
-                                    {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
-                                </span>
-                            </div>
-                        </div>
-
-                        <div className="space-y-3">
-                            <div className="flex items-center justify-between text-sm">
-                                <span className="text-slate-500 font-medium">Progress</span>
-                                <span className="font-black text-slate-700">
-                                    {(currentRound === 'MCQ' || currentRound === 'CONCEPTUAL') ? (
-                                        <>Question {questionCount} of {currentRound === 'MCQ' ? (config?.mcq?.maxQuestions || 7) : (config?.conceptual?.maxQuestions || 10)}</>
-                                    ) : (
-                                        <>Challenge {codingChallengeCount} of {currentRound === 'CODING' ? (config?.coding?.maxQuestions || 1) : 1}</>
-                                    )}
-                                </span>
-                            </div>
-                            <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                                <div
-                                    className="bg-gradient-to-r from-[#0095A9] to-[#00B4CC] h-full transition-all duration-500 rounded-full"
-                                    style={{
-                                        width: `${((currentRound === 'MCQ' || currentRound === 'CONCEPTUAL' ? questionCount : codingChallengeCount) /
-                                            (currentRound === 'MCQ' ? (config?.mcq?.maxQuestions || 7) :
-                                                currentRound === 'CONCEPTUAL' ? (config?.conceptual?.maxQuestions || 10) :
-                                                    currentRound === 'CODING' ? (config?.coding?.maxQuestions || 1) :
-                                                        ((config as any)?.systemDesign?.maxQuestions || 1))) * 100}%`
-                                    }}
-                                />
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Round Specific Instructions / Evaluation */}
-                    {(currentRound === 'CODING' || currentRound === 'SYSTEM_DESIGN') ? (
-                        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 space-y-6">
-                            <div className="flex items-center gap-2 pb-4 border-b border-slate-50">
-                                <AlertCircle className="w-5 h-5 text-[#0095A9]" />
-                                <h3 className="text-xs font-black text-slate-700 uppercase tracking-widest">Instructions</h3>
+                {currentRound === 'MCQ' || currentRound === 'CONCEPTUAL' ? (
+                    <div className="flex-1 flex flex-col p-8 space-y-6 overflow-y-auto">
+                        {/* Progress Tracker */}
+                        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+                            <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-xs font-black text-[#0095A9] uppercase tracking-widest">
+                                    {currentRound === 'MCQ' ? 'Round 1: Screening' : 'Round 2: Conceptual'}
+                                </h3>
+                                <div className="flex items-center gap-2">
+                                    <Clock className="w-4 h-4 text-slate-400" />
+                                    <span className="text-sm font-bold text-slate-600">
+                                        {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
+                                    </span>
+                                </div>
                             </div>
 
-                            <div className="space-y-4">
-                                <p className="text-sm text-slate-600 leading-relaxed">
-                                    {currentRound === 'CODING' ? (
-                                        <>
-                                            Please use your favorite local IDE (VS Code, IntelliJ, etc.) or an online compiler to solve this challenge.
-                                            <strong> Copy the boilerplate class</strong> from the question, implement your logic, and paste <strong>only the solution part</strong> back here in the chat.
-                                        </>
-                                    ) : (
-                                        <>
-                                            Utilize any design tools or local editors to draft your architecture.
-                                            Submit your design description, component breakdowns, or trade-off analysis here in the chat once ready.
-                                        </>
-                                    )}
-                                </p>
-
-                                {currentRound === 'CODING' && (
-                                    <div className="bg-slate-50 rounded-xl p-4 font-mono text-[11px] text-slate-500 border border-slate-100">
-                                        <div className="flex items-center justify-between mb-2">
-                                            <span className="uppercase tracking-widest font-black text-[9px] text-slate-400">Example Format</span>
-                                        </div>
-                                        <pre className="text-slate-600">
-                                            {`class Solution {\n    public long maximumSum(int[] arr) {\n        // Your implementation here\n    }\n}`}
-                                        </pre>
-                                    </div>
-                                )}
-
-                                <div className="flex items-start gap-3 p-4 bg-[#0095A9]/5 rounded-xl border border-[#0095A9]/10">
-                                    <ShieldCheck className="w-5 h-5 text-[#0095A9] flex-shrink-0" />
-                                    <p className="text-[11px] text-[#0095A9] font-medium leading-relaxed">
-                                        Note: Your screen is being recorded for integrity. DM will review your local development process.
-                                    </p>
+                            <div className="space-y-3">
+                                <div className="flex items-center justify-between text-sm">
+                                    <span className="text-slate-500 font-medium">Progress</span>
+                                    <span className="font-black text-slate-700">
+                                        Question {questionCount} of {currentRound === 'MCQ' ? (config?.mcq?.maxQuestions || 7) : (config?.conceptual?.maxQuestions || 10)}
+                                    </span>
+                                </div>
+                                <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                                    <div
+                                        className="bg-gradient-to-r from-[#0095A9] to-[#00B4CC] h-full transition-all duration-500 rounded-full"
+                                        style={{
+                                            width: `${(questionCount / (currentRound === 'MCQ' ? (config?.mcq?.maxQuestions || 7) : (config?.conceptual?.maxQuestions || 10))) * 100}%`
+                                        }}
+                                    />
                                 </div>
                             </div>
                         </div>
-                    ) : (
+
+                        {/* Evaluation Criteria */}
                         <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
                             <div className="flex items-center gap-2 mb-4">
                                 <ListChecks className="w-5 h-5 text-[#0095A9]" />
@@ -865,35 +813,101 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
                                 )}
                             </ul>
                         </div>
-                    )}
 
-                    {/* Tips - Dynamic */}
-                    <div className="bg-gradient-to-br from-[#0095A9]/5 to-[#00B4CC]/5 rounded-2xl p-6 border border-[#0095A9]/10">
-                        <div className="flex items-center gap-2 mb-3">
-                            <Zap className="w-5 h-5 text-[#0095A9]" />
-                            <h3 className="text-xs font-black text-slate-700 uppercase tracking-widest">Tip for This Round</h3>
+                        {/* Tips */}
+                        <div className="bg-gradient-to-br from-[#0095A9]/5 to-[#00B4CC]/5 rounded-2xl p-6 border border-[#0095A9]/10">
+                            <div className="flex items-center gap-2 mb-3">
+                                <Zap className="w-5 h-5 text-[#0095A9]" />
+                                <h3 className="text-xs font-black text-slate-700 uppercase tracking-widest">Tip for This Round</h3>
+                            </div>
+                            <p className="text-sm text-slate-600 leading-relaxed">
+                                {currentRound === 'MCQ'
+                                    ? "Take your time to read each question carefully. There's no penalty for thinking before answering."
+                                    : "Explain your thought process clearly. We value how you approach problems, not just the final answer."
+                                }
+                            </p>
                         </div>
-                        <p className="text-sm text-slate-600 leading-relaxed">
-                            {currentRound === 'MCQ' ? "Take your time to read each question carefully." :
-                                currentRound === 'CONCEPTUAL' ? "Explain your thought process clearly." :
-                                    currentRound === 'CODING' ? "Ensure your code is clean and handles edge cases." :
-                                        "Focus on scalability and system trade-offs."}
-                        </p>
-                    </div>
 
-                    {/* Job Details */}
-                    <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 mt-auto">
-                        <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Interview For</h3>
-                        <p className="text-sm font-bold text-slate-700 mb-1">
-                            {selectedJobId ? selectedJobId.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : 'Technical Position'}
-                        </p>
-                        <p className="text-xs text-slate-500">EPAM Systems</p>
+                        {/* Job Details */}
+                        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 mt-auto">
+                            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Interview For</h3>
+                            <p className="text-sm font-bold text-slate-700 mb-1">
+                                {selectedJobId ? selectedJobId.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : 'Technical Position'}
+                            </p>
+                            <p className="text-xs text-slate-500">EPAM Systems</p>
 
-                        <div className="mt-4 pt-4 border-t border-slate-100">
-                            <p className="text-xs text-slate-400">Need help? Press <kbd className="px-2 py-1 bg-slate-100 rounded text-slate-600 font-mono">F1</kbd></p>
+                            <div className="mt-4 pt-4 border-t border-slate-100">
+                                <p className="text-xs text-slate-400">Need help? Press <kbd className="px-2 py-1 bg-slate-100 rounded text-slate-600 font-mono">F1</kbd></p>
+                            </div>
                         </div>
                     </div>
-                </div>
+                ) : (
+                    <>
+                        <div className="p-6 border-b border-slate-200 bg-white flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                                <div className="p-2 bg-slate-50 rounded-lg">
+                                    {currentRound === 'CODING' ? <Code className="w-4 h-4 text-slate-400" /> : <Layout className="w-4 h-4 text-slate-400" />}
+                                </div>
+                                <div className="flex flex-col">
+                                    <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">
+                                        {currentRound === 'CODING'
+                                            ? ((selectedJobId || '').includes('pm') || (selectedJobId || '').includes('hr') ? 'Strategy Module' : 'Logic Module')
+                                            : ((selectedJobId || '').includes('pm') || (selectedJobId || '').includes('hr') ? 'Case Blueprint' : 'System Blueprint')}
+                                    </h3>
+                                    <span className="text-[9px] text-slate-400 font-bold uppercase tracking-[0.2em] mt-0.5">Primary Workspace</span>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <button className="p-2 text-slate-400 hover:text-slate-600 transition-colors"><Smartphone className="w-4 h-4" /></button>
+                                <button className="p-2 text-slate-400 hover:text-slate-600 transition-colors"><Monitor className="w-4 h-4" /></button>
+                            </div>
+                        </div>
+
+                        <div className="flex-1 flex flex-col min-h-0 bg-white">
+                            <textarea
+                                value={code}
+                                onChange={(e) => setCode(e.target.value)}
+                                className="flex-1 w-full bg-white text-slate-800 p-8 font-mono text-[14px] leading-relaxed resize-none focus:outline-none caret-[#0095A9] overflow-y-auto selection:bg-[#0095A9]/10"
+                                spellCheck={false}
+                            />
+
+                            <div className="h-52 bg-[#0d1117] flex flex-col shadow-2xl">
+                                <div className="px-5 py-3 border-b border-white/5 bg-[#161b22] flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-2 h-2 rounded-full bg-green-500/50"></div>
+                                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] italic">Standard Shell</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={runCheck}
+                                            disabled={isRunning}
+                                            className="px-4 py-1.5 bg-[#0095A9] hover:bg-[#008496] text-[10px] text-white font-black rounded-lg transition-all transform active:scale-95 uppercase tracking-widest disabled:opacity-50"
+                                        >
+                                            {isRunning ? 'Analyzing...' : ((selectedJobId || '').includes('pm') || (selectedJobId || '').includes('hr') ? 'Evaluate Plan' : 'Execute Checks')}
+                                        </button>
+                                        {currentRound === 'CODING' && codingChallengeCount < (config?.coding?.maxQuestions || 1) && (
+                                            <button
+                                                onClick={() => {
+                                                    setCode('');
+                                                    setConsoleOutput('');
+                                                    setCodingChallengeCount(prev => prev + 1);
+                                                    sendMessage('I am ready for the next coding challenge.');
+                                                }}
+                                                disabled={isLoading}
+                                                className="px-4 py-1.5 bg-slate-600 hover:bg-slate-700 text-[10px] text-white font-black rounded-lg transition-all transform active:scale-95 uppercase tracking-widest disabled:opacity-50"
+                                            >
+                                                Next Challenge
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="flex-1 p-5 font-mono text-xs text-green-400/90 overflow-y-auto scrollbar-thin scrollbar-thumb-white/10">
+                                    <pre className="whitespace-pre-wrap">{consoleOutput || '> System ready. Awaiting instructions...'}</pre>
+                                </div>
+                            </div>
+                        </div>
+                    </>
+                )}
             </div>
         </div>
     );

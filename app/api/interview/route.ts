@@ -898,24 +898,18 @@ For Behavioral Questions: Competency-based assessment`;
 
             // Round 2: Coding - Only for technical roles, case studies for others
             `### ROUND 2 GUARDIAN: PRACTICAL ENFORCER
-             1. OUTPUT STRUCTURE: ${roleType === 'TECHNICAL' ? 'You MUST provide a Title, Description, Example, and Constraints for coding problems.' : 'You MUST provide a Case Study with Scenario, Problem Statement, and Expected Outcomes.'}
-             2. ${roleType === 'TECHNICAL' ? 'BOILERPLATE: You MUST populate the \'codeSnippet\' field with a working starter class or function.' : 'FRAMEWORK: You MUST provide a structured approach framework for business/creative problems.'}
-             3. NO REPEATS: NEVER provide the same problem/scenario twice.
-             4. FOCUS: ${roleType === 'TECHNICAL' ? 'Algorithmic problem solving.' : roleType === 'BUSINESS' ? 'Business problem-solving and analysis.' : 'Creative problem-solving and execution.'}
-             5. UNIQUENESS: Check conversation history carefully to avoid repeats.
-             6. NEXT CHALLENGE TRIGGER: If the user says "NEXT CHALLENGE", you MUST provide a BRAND NEW ${roleType === 'TECHNICAL' ? 'coding problem' : 'case study'} with full format (Title, Description, Examples, Constraints). DO NOT ask follow-up questions about the previous problem.`,
+             1. LOCAL IDE FLOW: The candidate is now using their local IDE.
+             2. BOILERPLATE: You MUST still provide a Title, Description, Examples, Constraints, and starter code (in 'codeSnippet').
+             3. CHAT SUBMISSION: Candidates will paste their code back into the chat.
+             4. DRY RUN VALIDATION: When the candidate submits code in the chat, you MUST perform a line-by-line mental dry run.
+             5. REPORTING: Inform the candidate of the execution results (e.g., "I've reviewed your code; it logic is sound and handles the constraints well" or "I noticed a potential syntax error in your loop").
+             6. NEXT CHALLENGE TRIGGER: If the user says "NEXT CHALLENGE", you MUST provide a BRAND NEW ${roleType === 'TECHNICAL' ? 'coding problem' : 'case study'} with full format. DO NOT ask follow-up questions about the previous problem.`,
 
             // Round 3: Design/Strategy - Universal but role-adaptive
             `### ROUND 3 GUARDIAN: DESIGN/STRATEGY ENFORCER
-             1. ROLE ADAPTIVE: 
-                - For TECHNICAL roles: System Design (HLD)
-                - For BUSINESS roles: Business Strategy & Process Design
-                - For CREATIVE roles: UX/Design Strategy
-                - For LEADERSHIP roles: Organizational & Strategic Design
-                - For OPERATIONAL roles: Process & Workflow Design
-             2. NO CODE: Do not ask for implementation or specific syntax.
-             3. NO REPEATS: Do not discuss the same design problem already covered.
-             4. STAKEHOLDER PERSONA: Act as an appropriate role asking for trade-offs.`
+             1. ARTIFACT SUBMISSION: The candidate solves this in their local environment/design tools and submits the description/logic in the chat.
+             2. VALIDATION: Perform a thorough "Dry Run" of their architecture/strategy. Check for scalability, trade-offs, and requirement coverage.
+             3. INTERACTION: Acknowledge their submitted artifact and dive deep into specific design decisions.`
         ];
 
         const roundPrompts = [
@@ -957,29 +951,21 @@ For Behavioral Questions: Competency-based assessment`;
             // Round 2: Coding or Case Study based on role
             roleType === 'TECHNICAL'
                 ? `ROUND 2: PRACTICAL CODING ASSESSMENT.
-             - Goal: Evaluate problem-solving skills and technical implementation ability.
-             - Persona: Technical Evaluator assessing coding proficiency.
-             - TASK: Provide ONE coding problem relevant to: ${selectedJob?.must_have?.[0] || 'Core Technical Skills'}.
-             - FORMAT REQUIRED: Clear problem statement with Title, Description, Example Input/Output, Constraints.
-             - CRITICAL: NEVER repeat the same coding problem. Check history to ensure uniqueness.
-             - BOILERPLATE: Provide starter code in 'codeSnippet' field.
-             - EVALUATION: Focus on their approach, code quality, edge case handling.
-             - NO HELPING: If they struggle, do not provide hints. Observe their problem-solving process.
-             - COMPLETION: Once they provide a solution (or give up), provide evaluation and move on.
-             - TIME MANAGEMENT: Respect the configured number of coding challenges. Generate one problem at a time.
+             - Persona: Technical Evaluator.
+             - FLOW: Lead the candidate through personal IDE coding.
+             - SUBMISSION: Candidate will paste code in chat. 
+             - VALIDATION: You MUST check the submitted code for:
+               1. Strict adherence to the provided boilerplate.
+               2. Logical correctness (perform a line-by-line dry run).
+               3. Time/Space efficiency and Edge cases.
+             - FEEDBACK: Report the results of your dry run back to the candidate immediately.
              ${customSkills && customSkills.length > 0 ? `- MANDATORY: Problem and code MUST use: ${customSkills.join(', ')}` : ''}`
                 : `ROUND 2: PRACTICAL CASE STUDY ASSESSMENT.
-             - Goal: Evaluate analytical thinking and problem-solving in business context.
-             - Persona: Business Evaluator assessing strategic thinking.
-             - TASK: Provide ONE business scenario relevant to: ${selectedJob?.must_have?.[0] || 'Core Business Competencies'}.
-             - FORMAT REQUIRED: Realistic scenario with clear problem statement and data.
-             - CRITICAL: NEVER repeat the same case study. Ensure uniqueness.
-             - FRAMEWORK: Provide analytical framework in 'codeSnippet' field.
-             - EVALUATION: Focus on their analytical approach, assumptions, recommendations.
-             - DISCUSSION: Engage in dialogue about their solution, ask probing questions.
-             - COMPLETION: Once discussed thoroughly, provide evaluation and move on.`,
+             - Goal: Evaluate analytical thinking.
+             - SUBMISSION: Candidate will paste their strategy/artifacts in chat.
+             - VALIDATION: Critique the analytical depth and assumptions. Engage in dialogue.`,
 
-            // Round 3: Design/Strategy - Role-adaptive
+            // Round 3: Design/Strategy - Universal but role-adaptive
             `ROUND 3: ${roleType === 'TECHNICAL' ? 'SYSTEM ARCHITECTURE' : 'STRATEGIC THINKING'} ASSESSMENT.
              - Goal: Evaluate ${roleType === 'TECHNICAL' ? 'system design' : 'strategic problem-solving'} skills.
              - Persona: ${roleType === 'TECHNICAL' ? 'Principal Architect' : 'Senior Strategist'} assessing high-level thinking.
