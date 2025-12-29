@@ -109,68 +109,92 @@ export async function POST(req: NextRequest) {
         // If the report is in the old format (doesn't have triplets), attempt to rebuild it
         if (!reportContent.includes('### 🗨️') && !transcriptDataRes.error) {
             try {
-                console.log('[Finalize API] Attempting robust report upgrade...');
+                console.log('[Finalize API] Starting bucket-based report upgrade...');
                 const fullTranscript = JSON.parse(await transcriptDataRes.data.text());
 
-                // 1. Extract Legacy Notes
-                const notes: { type: string, content: string }[] = [];
-                const noteMatches = reportContent.matchAll(/(Mcq|Conceptual|Coding|System [Dd]esign) - Note:\s*([\s\S]*?)(?=\n(?:Mcq|Conceptual|Coding|System [Dd]esign) - Note:|\nFINAL|$)/g);
-                for (const match of noteMatches) {
-                    notes.push({ type: match[1], content: match[2].trim() });
+                // 1. Extract Notes into Buckets
+                const noteBuckets: Record<string, string[]> = {
+                    'Mcq': [],
+                    'Conceptual': [],
+                    'Coding': [],
+                    'System Design': []
+                };
+
+                // Pattern: ### [Round] - Note:\s*[Content]
+                // Stop before: next ### OR next [Round] - Note: OR FINAL
+                const noteRegex = /(Mcq|Conceptual|Coding|System [Dd]esign) - Note:\s*([\s\S]*?)(?=\n(?:Mcq|Conceptual|Coding|System [Dd]esign) - Note:|\n###|\nFINAL|$)/g;
+                let match;
+                while ((match = noteRegex.exec(reportContent)) !== null) {
+                    const type = match[1];
+                    const content = match[2].trim();
+                    if (noteBuckets[type]) {
+                        noteBuckets[type].push(content);
+                    }
                 }
 
-                // 2. Extract Questions and Replies from Transcript
-                const questions: string[] = [];
-                const replies: string[] = [];
-                let runningQuestion = "Opening question";
+                // 2. Extract Transcript into Buckets
+                const transcriptBuckets: Record<string, { q: string, r: string }[]> = {
+                    'Mcq': [],
+                    'Conceptual': [],
+                    'Coding': [],
+                    'System Design': []
+                };
+
+                let currentBucket = 'Mcq'; // Start with MCQ
+                let lastQuestion = "Opening question";
 
                 for (const msg of fullTranscript) {
                     if (msg.role === 'model') {
-                        runningQuestion = msg.text;
+                        // Detect round transitions in AI speech
+                        const text = msg.text.toLowerCase();
+                        if (text.includes('conceptual discussion') || text.includes('shift gears into a more conceptual')) currentBucket = 'Conceptual';
+                        else if (text.includes('coding assessment') || text.includes('practical coding')) currentBucket = 'Coding';
+                        else if (text.includes('system design discussion') || text.includes('move into a system design')) currentBucket = 'System Design';
+
+                        lastQuestion = msg.text;
                     } else if (msg.role === 'user') {
-                        // Skip the very first "Start" trigger if it looks like one
-                        const isTrigger = /start the interview/i.test(msg.text) ||
-                            (msg.text.length < 20 && /start/i.test(msg.text));
+                        const isTrigger = /start the interview/i.test(msg.text) || (msg.text.length < 20 && /start/i.test(msg.text));
                         if (!isTrigger) {
-                            questions.push(runningQuestion);
-                            replies.push(msg.text);
+                            transcriptBuckets[currentBucket].push({ q: lastQuestion, r: msg.text });
                         }
                     }
                 }
 
                 const upgradedReport = ["# 📋 Interview Protocol (Upgraded)\n"];
 
-                // 3. Mesh into Triplets
-                const maxInteractions = Math.max(replies.length, notes.length);
-                for (let i = 0; i < maxInteractions; i++) {
-                    const reply = replies[i];
-                    const note = notes[i];
-                    const question = questions[i] || "Follow-up discussion";
+                // 3. Mesh Buckets
+                const order = ['Mcq', 'Conceptual', 'Coding', 'System Design'];
+                let globalInteractionIdx = 1;
 
-                    if (reply || note) {
-                        const typeLabel = note?.type || "Interaction";
-                        upgradedReport.push(`\n---\n### 🗨️ ${typeLabel} - Interaction ${i + 1}`);
-                        upgradedReport.push(`**Interviewer (AI):**\n${question}`);
-                        if (reply) upgradedReport.push(`\n**Candidate Reply:**\n> ${reply}`);
-                        if (note) upgradedReport.push(`\n#### 🔍 AI Evaluation\n${note.content}`);
-                        upgradedReport.push("\n---");
+                for (const type of order) {
+                    const tBucket = transcriptBuckets[type];
+                    const nBucket = noteBuckets[type];
+                    const count = Math.max(tBucket.length, nBucket.length);
+
+                    if (count > 0) {
+                        upgradedReport.push(`\n## 📝 ${type} Internal Review`);
+                        for (let i = 0; i < count; i++) {
+                            const interaction = tBucket[i];
+                            const note = nBucket[i];
+
+                            upgradedReport.push(`\n---\n### 🗨️ ${type} - Interaction ${globalInteractionIdx++}`);
+                            upgradedReport.push(`**Interviewer (AI):**\n${interaction?.q || "Follow-up question"}`);
+                            if (interaction?.r) upgradedReport.push(`\n**Candidate Reply:**\n> ${interaction.r}`);
+                            if (note) upgradedReport.push(`\n#### 🔍 AI Evaluation\n${note}`);
+                            upgradedReport.push("\n---");
+                        }
                     }
                 }
 
                 // 4. Capture Final Workspaces (avoiding duplicates)
                 const capturedWorkspaces = new Set<string>();
-
                 const finalSections = reportContent.split(/(?=FINAL (?:CODING|SYSTEM_DESIGN) WORKSPACE CAPTURE)/);
                 for (const section of finalSections) {
                     if (section.startsWith('FINAL')) {
                         const cleanSection = section.trim();
-                        // Subdivide to ensure internal dividers don't cause issues
-                        const subSections = cleanSection.split(/(?=FINAL (?:CODING|SYSTEM_DESIGN) WORKSPACE CAPTURE)/);
-                        for (const sub of subSections) {
-                            if (sub.startsWith('FINAL') && !capturedWorkspaces.has(sub.trim())) {
-                                upgradedReport.push("\n\n" + sub.trim());
-                                capturedWorkspaces.add(sub.trim());
-                            }
+                        if (!capturedWorkspaces.has(cleanSection)) {
+                            upgradedReport.push("\n\n" + cleanSection);
+                            capturedWorkspaces.add(cleanSection);
                         }
                     }
                 }
@@ -185,9 +209,9 @@ export async function POST(req: NextRequest) {
                         upsert: true
                     });
 
-                console.log(`[Finalize API] Report upgraded with ${notes.length} interactions.`);
+                console.log(`[Finalize API] Bucket upgrade complete. MCQ: ${noteBuckets['Mcq'].length}, Conceptual: ${noteBuckets['Conceptual'].length}`);
             } catch (upgradeErr) {
-                console.warn('[Finalize API] Robust report upgrade failed:', upgradeErr);
+                console.warn('[Finalize API] Bucket upgrade failed:', upgradeErr);
             }
         }
 
