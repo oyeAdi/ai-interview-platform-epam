@@ -29,32 +29,49 @@ export async function POST(req: NextRequest) {
 
         const reportContent = await reportDataRes.data.text();
         let transcriptContent = 'No transcript available.';
+        let filteredCandidateReplies = 'No verbal candidate responses found.';
 
         if (!transcriptDataRes.error) {
-            transcriptContent = await transcriptDataRes.data.text();
+            try {
+                const fullTranscript = JSON.parse(await transcriptDataRes.data.text());
+                // Filter for candidate (user) role only, starting after Round 0 (MCQ)
+                // In our current flow, Round 0 is the first set of messages. 
+                // However, detecting "Round 0" index in a flat message list is tricky.
+                // We'll trust the LLM prompt to focus on everything except MCQ, but we'll provide ONLY candidate lines.
+                const candidateMessages = Array.isArray(fullTranscript)
+                    ? fullTranscript.filter((m: any) => m.role === 'user' && m.text && !m.text.includes('Start the interview'))
+                    : [];
+
+                if (candidateMessages.length > 0) {
+                    filteredCandidateReplies = candidateMessages.map((m: any, i: number) => `Candidate Reply ${i + 1}: "${m.text}"`).join('\n\n');
+                }
+                transcriptContent = JSON.stringify(fullTranscript, null, 2);
+            } catch (e) {
+                console.warn('[Finalize API] Failed to parse transcript JSON, using raw text fallback.');
+                transcriptContent = await transcriptDataRes.data.text();
+            }
         }
 
         // 2. Synthesis Logic (LLM)
-        const systemPrompt = "You are a Senior Delivery Manager at EPAM and an expert in AI-generated content detection. Provide a final structured assessment and evaluate the likelihood of AI usage.";
+        const systemPrompt = "You are a Senior Delivery Manager at EPAM and an expert in AI-generated content detection. Provide a final structured assessment and evaluate the likelihood of AI usage based ONLY on the candidate's verbal replies.";
         const userPrompt = `
-            Analyze this interview report and full transcript to provide a high-level summary for the Delivery Manager.
+            Analyze this interview report and the CANDIDATE'S responses from the transcript to provide a high-level summary for the Delivery Manager.
             
             ### CRITICAL: PLAGIARISM / AI DETECTION
-            Analyze the CANDIDATE responses in the transcript (Found in "Round 1" onwards - IGNORE Round 0/MCQs). 
-            Look for patterns typical of AI (ChatGPT/Claude):
+            Analyze the SPECIFIC CANDIDATE REPLIES below for patterns typical of AI (ChatGPT/Claude):
             - Perfectly structured lists and "hallmarks" of LLM writing style.
-            - Overly formal, robotic, or repetitive transition phrases.
-            - Perfect grammar and lack of natural conversational fillers.
-            - Highly generic but technically correct answers that lack specific personal experience.
+            - Overly formal, robotic, or repetitive transition phrases (e.g., "Certainly!", "In conclusion", "Moreover").
+            - Perfect grammar and lack of natural conversational fillers/hesitations.
+            - Highly generic but technically correct answers that lack specific personal experience or proprietary context.
+            
+            CANDIDATE REPLIES FOR ANALYSIS:
+            ${filteredCandidateReplies}
             
             ### ACTUAL IMPLEMENTATION EVALUATION
             The report contains a "FINAL WORKSPACE CAPTURE" section. You MUST evaluate the quality and correctness of the actual code or system design provided.
             
             Report Content:
             ${reportContent}
-
-            Full Transcript (for AI detection):
-            ${transcriptContent}
 
             IMPORTANT: Respond ONLY in strict JSON format:
             {
@@ -68,7 +85,7 @@ export async function POST(req: NextRequest) {
                 "plagiarism_check": {
                     "score": 0-100, // Confidence level that the candidate used AI (0=Human, 100=AI)
                     "verdict": "Likely Human / Suspicious / Likely AI",
-                    "reasoning": "Brief explanation of why you reached this verdict based on transcript patterns."
+                    "reasoning": "Brief explanation focused only on the candidate's replies."
                 },
                 "overall_summary": "A 2-sentence executive summary...",
                 "verdict": "Hired / Not Hired",
