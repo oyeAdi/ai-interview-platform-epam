@@ -95,6 +95,13 @@ export default function Dashboard() {
                 setSessions(prev => prev.map(s =>
                     s.id === selectedSession.id ? { ...s, hasFinalFeedback: true } : s
                 ));
+
+                // RE-LOAD THE UPGRADED REPORT CONTENT
+                const reportRes = await fetch(`/api/dm/report?folder=${selectedSession?.folderName}&type=report`);
+                if (reportRes.ok) {
+                    const text = await reportRes.text();
+                    setFullReport(text);
+                }
             }
         } catch (err) {
             console.error("Failed to finalize", err);
