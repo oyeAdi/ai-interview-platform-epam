@@ -109,58 +109,85 @@ export async function POST(req: NextRequest) {
         // If the report is in the old format (doesn't have triplets), attempt to rebuild it
         if (!reportContent.includes('### 🗨️') && !transcriptDataRes.error) {
             try {
-                console.log('[Finalize API] Attempting report upgrade to triplet format...');
+                console.log('[Finalize API] Attempting robust report upgrade...');
                 const fullTranscript = JSON.parse(await transcriptDataRes.data.text());
 
-                // Extract old notes using regex
-                // Pattern matches: [Type] - Note: [Content]
-                const noteRegex = /(Mcq|Conceptual|Coding|System [Dd]esign) - Note:\s*([\s\S]*?)(?=\n(?:Mcq|Conceptual|Coding|System [Dd]esign) - Note:|\nFINAL|$)/g;
-                const legacyNotes: { type: string, content: string }[] = [];
-                let match;
-                while ((match = noteRegex.exec(reportContent)) !== null) {
-                    legacyNotes.push({ type: match[1], content: match[2].trim() });
+                // 1. Extract Legacy Notes
+                const notes: { type: string, content: string }[] = [];
+                const noteMatches = reportContent.matchAll(/(Mcq|Conceptual|Coding|System [Dd]esign) - Note:\s*([\s\S]*?)(?=\n(?:Mcq|Conceptual|Coding|System [Dd]esign) - Note:|\nFINAL|$)/g);
+                for (const match of noteMatches) {
+                    notes.push({ type: match[1], content: match[2].trim() });
                 }
 
-                if (legacyNotes.length > 0) {
-                    let upgradedReport = "# 📋 Interview Protocol (Upgraded)\n\n";
-                    let currentNoteIdx = 0;
-                    let lastQuestion = "Opening question";
+                // 2. Extract Questions and Replies from Transcript
+                const questions: string[] = [];
+                const replies: string[] = [];
+                let runningQuestion = "Opening question";
 
-                    for (let i = 0; i < fullTranscript.length; i++) {
-                        const msg = fullTranscript[i];
-                        if (msg.role === 'model') {
-                            lastQuestion = msg.text;
-                        } else if (msg.role === 'user' && !msg.text.includes('Start the interview')) {
-                            const note = legacyNotes[currentNoteIdx];
-                            if (note) {
-                                const typeLabel = note.type.charAt(0).toUpperCase() + note.type.slice(1);
-                                upgradedReport += `\n---\n### 🗨️ ${typeLabel} - Interaction ${currentNoteIdx + 1}\n`;
-                                upgradedReport += `**Interviewer (AI):**\n${lastQuestion}\n\n`;
-                                upgradedReport += `**Candidate Reply:**\n> ${msg.text}\n\n`;
-                                upgradedReport += `#### 🔍 AI Evaluation\n${note.content}\n---\n`;
-                                currentNoteIdx++;
+                for (const msg of fullTranscript) {
+                    if (msg.role === 'model') {
+                        runningQuestion = msg.text;
+                    } else if (msg.role === 'user') {
+                        // Skip the very first "Start" trigger if it looks like one
+                        const isTrigger = /start the interview/i.test(msg.text) ||
+                            (msg.text.length < 20 && /start/i.test(msg.text));
+                        if (!isTrigger) {
+                            questions.push(runningQuestion);
+                            replies.push(msg.text);
+                        }
+                    }
+                }
+
+                const upgradedReport = ["# 📋 Interview Protocol (Upgraded)\n"];
+
+                // 3. Mesh into Triplets
+                const maxInteractions = Math.max(replies.length, notes.length);
+                for (let i = 0; i < maxInteractions; i++) {
+                    const reply = replies[i];
+                    const note = notes[i];
+                    const question = questions[i] || "Follow-up discussion";
+
+                    if (reply || note) {
+                        const typeLabel = note?.type || "Interaction";
+                        upgradedReport.push(`\n---\n### 🗨️ ${typeLabel} - Interaction ${i + 1}`);
+                        upgradedReport.push(`**Interviewer (AI):**\n${question}`);
+                        if (reply) upgradedReport.push(`\n**Candidate Reply:**\n> ${reply}`);
+                        if (note) upgradedReport.push(`\n#### 🔍 AI Evaluation\n${note.content}`);
+                        upgradedReport.push("\n---");
+                    }
+                }
+
+                // 4. Capture Final Workspaces (avoiding duplicates)
+                const capturedWorkspaces = new Set<string>();
+
+                const finalSections = reportContent.split(/(?=FINAL (?:CODING|SYSTEM_DESIGN) WORKSPACE CAPTURE)/);
+                for (const section of finalSections) {
+                    if (section.startsWith('FINAL')) {
+                        const cleanSection = section.trim();
+                        // Subdivide to ensure internal dividers don't cause issues
+                        const subSections = cleanSection.split(/(?=FINAL (?:CODING|SYSTEM_DESIGN) WORKSPACE CAPTURE)/);
+                        for (const sub of subSections) {
+                            if (sub.startsWith('FINAL') && !capturedWorkspaces.has(sub.trim())) {
+                                upgradedReport.push("\n\n" + sub.trim());
+                                capturedWorkspaces.add(sub.trim());
                             }
                         }
                     }
-
-                    // Append workspace captures if they exist
-                    const workspaceCaptureIdx = reportContent.indexOf('FINAL');
-                    if (workspaceCaptureIdx !== -1) {
-                        upgradedReport += "\n\n" + reportContent.slice(workspaceCaptureIdx);
-                    }
-
-                    // Save upgraded report back to cloud
-                    await supabaseAdmin.storage
-                        .from('assessment-data')
-                        .upload(reportStoragePath, upgradedReport, {
-                            contentType: 'text/markdown',
-                            upsert: true
-                        });
-
-                    console.log('[Finalize API] Report upgraded successfully.');
                 }
+
+                const finalMarkdown = upgradedReport.join('\n');
+
+                // Save upgraded report
+                await supabaseAdmin.storage
+                    .from('assessment-data')
+                    .upload(reportStoragePath, finalMarkdown, {
+                        contentType: 'text/markdown',
+                        upsert: true
+                    });
+
+                console.log(`[Finalize API] Report upgraded with ${notes.length} interactions.`);
             } catch (upgradeErr) {
-                console.warn('[Finalize API] Report upgrade failed (non-critical):', upgradeErr);
+                console.warn('[Finalize API] Robust report upgrade failed:', upgradeErr);
             }
         }
 
