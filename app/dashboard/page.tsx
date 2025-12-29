@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Play, FileText, Calendar, User, Search, Monitor, ShieldCheck, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
+import { Play, FileText, Calendar, User, Search, Monitor, ShieldCheck, CheckCircle2, AlertCircle, RefreshCw, Shield } from 'lucide-react';
 import GlobalHeader from '@/components/GlobalHeader';
 import ReactMarkdown from 'react-markdown';
 import { clsx, type ClassValue } from 'clsx';
@@ -187,16 +187,18 @@ export default function Dashboard() {
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-4">
-                                    {!finalFeedback ? (
-                                        <button
-                                            onClick={generateFinalFeedback}
-                                            disabled={isFinalizing}
-                                            className="px-8 py-3.5 bg-[#003040] hover:bg-[#003040]/90 text-white text-[11px] font-black uppercase tracking-[0.2em] rounded-2xl flex items-center gap-3 transition-all active:scale-95 disabled:opacity-50 shadow-xl shadow-[#003040]/20"
-                                        >
-                                            {isFinalizing ? <RefreshCw size={16} className="animate-spin" /> : <ShieldCheck size={16} />}
-                                            {isFinalizing ? 'Analyzing Protocol...' : 'Synthesize Verdict'}
-                                        </button>
-                                    ) : (
+                                    <button
+                                        onClick={generateFinalFeedback}
+                                        disabled={isFinalizing}
+                                        className={cn(
+                                            "px-8 py-3.5 text-[11px] font-black uppercase tracking-[0.2em] rounded-2xl flex items-center gap-3 transition-all active:scale-95 disabled:opacity-50 shadow-xl",
+                                            finalFeedback ? "bg-white border border-slate-200 text-slate-400 hover:text-[#0095A9] hover:border-[#0095A9]/20 shadow-slate-200/20" : "bg-[#003040] text-white hover:bg-[#003040]/90 shadow-[#003040]/20"
+                                        )}
+                                    >
+                                        {isFinalizing ? <RefreshCw size={16} className="animate-spin" /> : (finalFeedback ? <RefreshCw size={16} /> : <ShieldCheck size={16} />)}
+                                        {isFinalizing ? 'Analyzing Protocol...' : (finalFeedback ? 'Re-analyze Protocol' : 'Synthesize Verdict')}
+                                    </button>
+                                    {finalFeedback && (
                                         <div className={cn(
                                             "flex items-center gap-3 px-6 py-3 rounded-2xl border-2 font-black text-xs uppercase tracking-widest transition-all",
                                             finalFeedback.verdict.includes('Not Hired')
@@ -242,7 +244,7 @@ export default function Dashboard() {
                                     {finalFeedback ? (
                                         <div className="max-w-6xl mx-auto space-y-8 pb-12">
                                             {/* Assessment Grid */}
-                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                                                 <VerdictMetricCard
                                                     title="Technical"
                                                     text={finalFeedback.technical}
@@ -257,6 +259,23 @@ export default function Dashboard() {
                                                     title="Communication"
                                                     text={finalFeedback.communication}
                                                     icon={<FileText className="text-[#0095A9]" size={20} />}
+                                                />
+                                                <VerdictMetricCard
+                                                    title="AI Detection"
+                                                    text={finalFeedback.plagiarism_check ?
+                                                        `${finalFeedback.plagiarism_check.verdict}: ${finalFeedback.plagiarism_check.reasoning}` :
+                                                        "This is a legacy assessment. Click 'Re-analyze Protocol' above to enable AI detection analysis."
+                                                    }
+                                                    icon={<Shield className={cn(
+                                                        !finalFeedback.plagiarism_check ? "text-slate-300" :
+                                                            finalFeedback.plagiarism_check.score > 70 ? "text-rose-500" :
+                                                                finalFeedback.plagiarism_check.score > 40 ? "text-amber-500" :
+                                                                    "text-emerald-500"
+                                                    )} size={20} />}
+                                                    badge={finalFeedback.plagiarism_check?.score !== undefined ?
+                                                        `${finalFeedback.plagiarism_check.score}% Confidence` :
+                                                        "Legacy Data"
+                                                    }
                                                 />
                                             </div>
 
@@ -404,14 +423,24 @@ function TabTrigger({ active, onClick, icon, label }: { active: boolean, onClick
     );
 }
 
-function VerdictMetricCard({ title, text, icon }: { title: string, text: string, icon: any }) {
+function VerdictMetricCard({ title, text, icon, badge }: { title: string, text: string, icon: any, badge?: string }) {
     return (
-        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm hover:shadow-xl hover:shadow-slate-200/50 transition-all duration-500 group">
-            <div className="flex items-center gap-4 mb-5">
-                <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center group-hover:bg-[#0095A9]/5 transition-colors">
-                    {icon}
+        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm hover:shadow-xl hover:shadow-slate-200/50 transition-all duration-500 group relative overflow-hidden">
+            <div className="flex items-center justify-between mb-5">
+                <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center group-hover:bg-[#0095A9]/5 transition-colors">
+                        {icon}
+                    </div>
+                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{title}</h4>
                 </div>
-                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{title}</h4>
+                {badge && (
+                    <span className={cn(
+                        "text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-md",
+                        badge.includes('AI') || parseInt(badge) > 50 ? "bg-rose-50 text-rose-600" : "bg-emerald-50 text-emerald-600"
+                    )}>
+                        {badge}
+                    </span>
+                )}
             </div>
             <p className="text-[13px] leading-relaxed text-slate-600 font-semibold line-clamp-4 group-hover:line-clamp-none transition-all duration-500">
                 {text}

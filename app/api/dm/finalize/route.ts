@@ -13,35 +13,48 @@ export async function POST(req: NextRequest) {
         if (!folder) return NextResponse.json({ error: 'Folder name is required' }, { status: 400 });
 
         const reportStoragePath = `sessions/${folder}/report.md`;
+        const transcriptStoragePath = `sessions/${folder}/transcript.json`;
         const finalStoragePath = `sessions/${folder}/final_feedback.json`;
 
-        // 1. Read Report from Supabase
-        const { data: reportData, error: reportError } = await supabaseAdmin.storage
-            .from('assessment-data')
-            .download(reportStoragePath);
+        // 1. Read Report and Transcript from Supabase
+        const [reportDataRes, transcriptDataRes] = await Promise.all([
+            supabaseAdmin.storage.from('assessment-data').download(reportStoragePath),
+            supabaseAdmin.storage.from('assessment-data').download(transcriptStoragePath)
+        ]);
 
-        if (reportError) {
-            console.error('[Finalize API] Report download error:', reportError);
+        if (reportDataRes.error) {
+            console.error('[Finalize API] Report download error:', reportDataRes.error);
             return NextResponse.json({ error: 'Report not found in cloud storage' }, { status: 404 });
         }
 
-        const reportContent = await reportData.text();
+        const reportContent = await reportDataRes.data.text();
+        let transcriptContent = 'No transcript available.';
+
+        if (!transcriptDataRes.error) {
+            transcriptContent = await transcriptDataRes.data.text();
+        }
 
         // 2. Synthesis Logic (LLM)
-        const systemPrompt = "You are a Senior Delivery Manager at EPAM. Provide a final structured assessment based on an interview report.";
+        const systemPrompt = "You are a Senior Delivery Manager at EPAM and an expert in AI-generated content detection. Provide a final structured assessment and evaluate the likelihood of AI usage.";
         const userPrompt = `
-            Analyze this interview report and provide a high-level summary for the Delivery Manager.
+            Analyze this interview report and full transcript to provide a high-level summary for the Delivery Manager.
             
-            IMPORTANT: The report contains a "FINAL WORKSPACE CAPTURE" section. You MUST evaluate the quality, scalability, and correctness of the actual code or system design provided by the candidate in that section.
+            ### CRITICAL: PLAGIARISM / AI DETECTION
+            Analyze the CANDIDATE responses in the transcript (Found in "Round 1" onwards - IGNORE Round 0/MCQs). 
+            Look for patterns typical of AI (ChatGPT/Claude):
+            - Perfectly structured lists and "hallmarks" of LLM writing style.
+            - Overly formal, robotic, or repetitive transition phrases.
+            - Perfect grammar and lack of natural conversational fillers.
+            - Highly generic but technically correct answers that lack specific personal experience.
             
-            Focus on the following  area:
-            1. Overall Technical: Summary of technical competence across all rounds, including a critique of their final code/design implementation.
-            2. Overall Behavioral: Soft skills, attitude, and fit.
-            3. Overall Communication: Clarity, articulation, and interaction style.
-            4. Overall Feedback: Summarized Strengths and Areas of Improvement.
-
+            ### ACTUAL IMPLEMENTATION EVALUATION
+            The report contains a "FINAL WORKSPACE CAPTURE" section. You MUST evaluate the quality and correctness of the actual code or system design provided.
+            
             Report Content:
             ${reportContent}
+
+            Full Transcript (for AI detection):
+            ${transcriptContent}
 
             IMPORTANT: Respond ONLY in strict JSON format:
             {
@@ -52,7 +65,12 @@ export async function POST(req: NextRequest) {
                     "strengths": ["...", "..."],
                     "improvements": ["...", "..."]
                 },
-                "overall_summary": "A 2-sentence executive summary of the candidate's performance...",
+                "plagiarism_check": {
+                    "score": 0-100, // Confidence level that the candidate used AI (0=Human, 100=AI)
+                    "verdict": "Likely Human / Suspicious / Likely AI",
+                    "reasoning": "Brief explanation of why you reached this verdict based on transcript patterns."
+                },
+                "overall_summary": "A 2-sentence executive summary...",
                 "verdict": "Hired / Not Hired",
                 "reason": "Brief reason..."
             }

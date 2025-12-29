@@ -19,10 +19,11 @@ export default function GlobalHeader() {
                 <div className="flex items-center gap-4">
                     <Link
                         href="/dashboard"
-                        className="p-2 text-gray-400 hover:text-[#0095A9] hover:bg-gray-50 rounded-full transition-all"
+                        className="flex items-center gap-2 px-4 py-2 text-gray-400 hover:text-[#0095A9] hover:bg-gray-50 rounded-xl transition-all font-bold text-xs"
                         title="Dashboard"
                     >
                         <LayoutDashboard size={18} />
+                        <span>Dashboard</span>
                     </Link>
                     <button
                         className="p-2 text-gray-400 hover:text-[#0095A9] hover:bg-gray-50 rounded-full transition-all"
