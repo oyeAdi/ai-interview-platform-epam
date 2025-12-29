@@ -118,7 +118,18 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
                     }));
 
                     const roundTitle = activeRound.charAt(0) + activeRound.slice(1).toLowerCase().replace('_', ' ');
-                    setTechnicalReport(prev => prev + `\n### ${roundTitle} - Note:\n- ${data.candidateNote}\n`);
+
+                    const triplet = `
+---
+### 🗨️ ${roundTitle} - Note
+**Context:**
+${initialMessages[initialMessages.length - 1].text}
+
+#### 🔍 AI Evaluation
+${data.candidateNote}
+---
+`;
+                    setTechnicalReport(prev => prev + triplet);
                 }
             } else {
                 setMessages((prev) => [...prev, { role: 'model', text: "Ready. Let's begin." }]);
@@ -322,11 +333,8 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
         setMessages(newHistory);
         setInput('');
 
-        // Check if this was the last question - if so, transition after displaying the answer
-        if (questionCount >= maxQs) {
-            handleRoundTransition();
-            return;
-        }
+        // Check if this was theoretically the last question, but we still need to process this reply
+        const isLastQuestion = questionCount >= maxQs;
 
         setIsLoading(true);
 
@@ -360,7 +368,27 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
                     }));
 
                     const roundTitle = currentRound.charAt(0) + currentRound.slice(1).toLowerCase().replace('_', ' ');
-                    setTechnicalReport(prev => prev + `\n### ${roundTitle} - Note:\n- ${data.candidateNote}\n`);
+
+                    // STRUCTURED TRIPLET CAPTURE
+                    const triplet = `
+---
+### 🗨️ ${roundTitle} - Question ${questionCount + 1}
+**Interviewer (AI):**
+${currentQuestion || "Opening question"}
+
+**Candidate Reply:**
+> ${userInput}
+
+#### 🔍 AI Evaluation
+${data.candidateNote}
+---
+`;
+                    setTechnicalReport(prev => prev + triplet);
+                }
+
+                // If it was the last question, transition now AFTER processing the reply
+                if (isLastQuestion) {
+                    setTimeout(() => handleRoundTransition(), 1500); // Small delay to let user see AI response
                 }
             }
         } catch (err) {

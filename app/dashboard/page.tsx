@@ -383,7 +383,7 @@ export default function Dashboard() {
                                                 <span className="text-[10px] font-black uppercase tracking-widest">Retrieving Protocol...</span>
                                             </div>
                                         ) : (
-                                            <div className="prose prose-slate max-w-none prose-h1:text-2xl prose-h1:font-black prose-h1:text-[#003040] prose-h2:text-xl prose-h2:font-bold prose-h2:text-[#003040] prose-h2:border-l-4 prose-h2:border-[#0095A9] prose-h2:pl-6 prose-p:text-slate-600 prose-p:leading-relaxed prose-strong:text-[#0095A9] prose-strong:font-black">
+                                            <div className="prose prose-slate max-w-none prose-h1:text-2xl prose-h1:font-black prose-h1:text-[#003040] prose-h2:text-xl prose-h2:font-bold prose-h2:text-[#003040] prose-h2:border-l-4 prose-h2:border-[#0095A9] prose-h2:pl-6 prose-p:text-slate-600 prose-p:leading-relaxed prose-strong:text-[#0095A9] prose-strong:font-black prose-hr:border-slate-100 prose-hr:my-8 prose-blockquote:border-l-4 prose-blockquote:border-slate-200 prose-blockquote:bg-slate-50 prose-blockquote:py-1 prose-blockquote:px-6 prose-blockquote:rounded-r-2xl prose-blockquote:italic prose-h3:text-lg prose-h3:font-black prose-h3:text-slate-700 prose-h4:text-sm prose-h4:font-black prose-h4:text-[#0095A9] prose-h4:uppercase prose-h4:tracking-widest">
                                                 <ReactMarkdown>{fullReport}</ReactMarkdown>
                                             </div>
                                         )}
