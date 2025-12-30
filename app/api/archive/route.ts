@@ -84,8 +84,9 @@ export async function POST(req: NextRequest) {
                 transcript_url: transcriptUrl,
                 report_url: reportUrl,
                 recording_url: recordingUrl, // This now points to Firebase
-                updated_at: new Date().toISOString(),
-                created_at: new Date().toISOString() // created_at will be ignored on update if using standard upsert behavior or if handled by DB
+                updated_at: new Date().toISOString()
+            }, {
+                onConflict: 'session_id'
             });
 
         if (dbError) throw dbError;

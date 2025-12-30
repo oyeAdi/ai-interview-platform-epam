@@ -25,6 +25,7 @@ export default function AssessmentLanding() {
     const [loading, setLoading] = useState(true);
     const [started, setStarted] = useState(false);
     const [completed, setCompleted] = useState(false);
+    const [finishing, setFinishing] = useState(false);
     const [permissionDenied, setPermissionDenied] = useState(false);
     const [isTerminated, setIsTerminated] = useState(false);
     const [sessionId, setSessionId] = useState('');
@@ -72,7 +73,7 @@ export default function AssessmentLanding() {
     }, [params]);
 
     const handleFinish = async (messages: any[], summaries: string[], recordingBlob: Blob | null, fullReport: string) => {
-        setCompleted(true);
+        setFinishing(true);
         try {
             const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
             const jobId = tokenData?.jobId || 'unknown';
@@ -120,12 +121,23 @@ export default function AssessmentLanding() {
             }
 
             console.log('[Assessment] Archiving session metadata...');
-            await fetch('/api/archive', {
+            const archiveRes = await fetch('/api/archive', {
                 method: 'POST',
                 body: formData,
             });
+
+            if (archiveRes.ok) {
+                setCompleted(true);
+            } else {
+                console.error("[Assessment] Metadata archive failed");
+                // Allow completion anyway but log error
+                setCompleted(true);
+            }
         } catch (err) {
             console.error("Archive failed", err);
+            setCompleted(true);
+        } finally {
+            setFinishing(false);
         }
     };
 
@@ -149,10 +161,11 @@ export default function AssessmentLanding() {
         }
     };
 
-    if (loading) {
+    if (loading || finishing) {
         return (
-            <div className="min-h-screen bg-white flex items-center justify-center">
-                <Loader2 className="w-8 h-8 text-[#0095A9] animate-spin" />
+            <div className="min-h-screen bg-white flex flex-col items-center justify-center">
+                <Loader2 className="w-8 h-8 text-[#0095A9] animate-spin mb-4" />
+                {finishing && <p className="text-slate-500 font-bold animate-pulse">Archiving Session Data...</p>}
             </div>
         );
     }
