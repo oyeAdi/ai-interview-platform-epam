@@ -23,73 +23,77 @@ export async function POST(req: NextRequest) {
             sessionId = `session_${jobId}_${timestamp}`;
         }
 
-        // 1. Upload Transcript to Supabase
-        let transcriptUrl = '';
-        if (transcript) {
-            const { data } = await supabaseAdmin.storage
-                .from('assessment-data')
-                .upload(`sessions/${sessionId}/transcript.json`, transcript, {
-                    contentType: 'application/json',
-                    upsert: true
-                });
-            if (data) transcriptUrl = data.path;
-        }
-
-        // 2. Upload Report to Supabase
-        let reportUrl = '';
-        if (report) {
-            const { data } = await supabaseAdmin.storage
-                .from('assessment-data')
-                .upload(`sessions/${sessionId}/report.md`, report, {
-                    contentType: 'text/markdown',
-                    upsert: true
-                });
-            if (data) reportUrl = data.path;
-        }
-
-        // 3. Handle Recording (Either directly uploaded by client or as a Blob)
+        // Pre-determine URLs (since they are deterministic based on sessionId)
+        const transcriptPath = `sessions/${sessionId}/transcript.json`;
+        const reportPath = `sessions/${sessionId}/report.md`;
         let recordingUrl = formData.get('recordingPath') as string || '';
-        if (!recordingUrl && recording) {
-            if (!bucket) {
-                console.error('[Archive] Firebase bucket not initialized. Video upload skipped.');
-            } else {
-                console.log(`[Archive] Uploading recording to Firebase: sessions/${sessionId}/recording.webm`);
-                try {
-                    const file = bucket.file(`sessions/${sessionId}/recording.webm`);
-                    const buffer = Buffer.from(await recording.arrayBuffer());
 
-                    await file.save(buffer, {
-                        metadata: { contentType: 'video/webm' },
-                        resumable: false
-                    });
+        const tasks: Promise<any>[] = [];
 
-                    recordingUrl = file.name;
-                    console.log('[Archive] Firebase upload successful (vía Admin SDK):', recordingUrl);
-                } catch (fbError: any) {
-                    console.error('[Archive] Firebase upload failed:', fbError.message);
-                }
-            }
-        } else if (recordingUrl) {
-            console.log('[Archive] Using client-uploaded recording path:', recordingUrl);
+        // 1. Queue Transcript Upload
+        if (transcript) {
+            tasks.push(
+                supabaseAdmin.storage
+                    .from('assessment-data')
+                    .upload(transcriptPath, transcript, {
+                        contentType: 'application/json',
+                        upsert: true
+                    })
+            );
         }
 
-        // 4. Save Metadata to Supabase DB
-        const { error: dbError } = await supabaseAdmin
+        // 2. Queue Report Upload
+        if (report) {
+            tasks.push(
+                supabaseAdmin.storage
+                    .from('assessment-data')
+                    .upload(reportPath, report, {
+                        contentType: 'text/markdown',
+                        upsert: true
+                    })
+            );
+        }
+
+        // 3. Queue Recording Upload (to Firebase)
+        if (!recordingUrl && recording && bucket) {
+            const firebaseTask = (async () => {
+                const file = bucket.file(`sessions/${sessionId}/recording.webm`);
+                const buffer = Buffer.from(await recording.arrayBuffer());
+                await file.save(buffer, {
+                    metadata: { contentType: 'video/webm' },
+                    resumable: false
+                });
+                return file.name;
+            })();
+            tasks.push(firebaseTask.then(name => { recordingUrl = name; }));
+        }
+
+        // 4. Queue Database Upsert
+        // We can run this in parallel because we already know what the URLs WILL be
+        const dbTask = supabaseAdmin
             .from('assessment_sessions')
             .upsert({
                 session_id: sessionId,
                 job_id: jobId,
                 candidate_name: candidateName,
                 candidate_email: candidateEmail,
-                transcript_url: transcriptUrl,
-                report_url: reportUrl,
-                recording_url: recordingUrl,
+                transcript_url: transcriptPath,
+                report_url: reportPath,
+                recording_url: recordingUrl || (recording ? `sessions/${sessionId}/recording.webm` : ''),
                 updated_at: new Date().toISOString()
             }, {
                 onConflict: 'session_id'
             });
 
-        if (dbError) throw dbError;
+        tasks.push(dbTask);
+
+        // Execute all tasks in parallel
+        console.log(`[Archive API] Executing ${tasks.length} tasks in parallel for session: ${sessionId}`);
+        const results = await Promise.all(tasks);
+
+        // Check for errors in the results (optional but good practice)
+        const dbResult = results[results.length - 1]; // DB task was pushed last
+        if (dbResult.error) throw dbResult.error;
 
         return NextResponse.json({
             success: true,
