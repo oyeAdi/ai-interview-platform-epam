@@ -91,9 +91,13 @@ export async function POST(req: NextRequest) {
         console.log(`[Archive API] Executing ${tasks.length} tasks in parallel for session: ${sessionId}`);
         const results = await Promise.all(tasks);
 
-        // Check for errors in the results (optional but good practice)
-        const dbResult = results[results.length - 1]; // DB task was pushed last
-        if (dbResult.error) throw dbResult.error;
+        // Check for errors in the results
+        for (const res of results) {
+            if (res && typeof res === 'object' && res.error) {
+                console.error('[Archive API] Task failed:', res.error);
+                throw res.error;
+            }
+        }
 
         return NextResponse.json({
             success: true,
