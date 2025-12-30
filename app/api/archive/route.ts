@@ -74,31 +74,22 @@ export async function POST(req: NextRequest) {
         }
 
         // 4. Save Metadata to Supabase DB
-        console.log(`[Archive API] Attempting DB upsert for Session: ${sessionId}, Job: ${jobId}`);
-        const dbPayload = {
-            session_id: sessionId,
-            job_id: jobId,
-            candidate_name: candidateName,
-            candidate_email: candidateEmail,
-            transcript_url: transcriptUrl,
-            report_url: reportUrl,
-            recording_url: recordingUrl,
-            updated_at: new Date().toISOString()
-        };
-
-        const { data: dbData, error: dbError } = await supabaseAdmin
+        const { error: dbError } = await supabaseAdmin
             .from('assessment_sessions')
-            .upsert(dbPayload, { 
-                onConflict: 'session_id' 
-            })
-            .select();
+            .upsert({
+                session_id: sessionId,
+                job_id: jobId,
+                candidate_name: candidateName,
+                candidate_email: candidateEmail,
+                transcript_url: transcriptUrl,
+                report_url: reportUrl,
+                recording_url: recordingUrl,
+                updated_at: new Date().toISOString()
+            }, {
+                onConflict: 'session_id'
+            });
 
-        if (dbError) {
-            console.error('[Archive API] Supabase DB Error:', dbError);
-            throw dbError;
-        }
-
-        console.log('[Archive API] DB Save Successful:', dbData?.[0]?.id || 'Success');
+        if (dbError) throw dbError;
 
         return NextResponse.json({
             success: true,
