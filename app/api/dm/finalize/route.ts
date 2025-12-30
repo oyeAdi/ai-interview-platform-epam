@@ -164,24 +164,26 @@ export async function POST(req: NextRequest) {
 
                 // 3. Mesh Buckets
                 const order = ['Mcq', 'Conceptual', 'Coding', 'System Design'];
-                let globalInteractionIdx = 1;
-
-                for (const type of order) {
+                for (let roundIdx = 0; roundIdx < order.length; roundIdx++) {
+                    const type = order[roundIdx];
                     const tBucket = transcriptBuckets[type];
                     const nBucket = noteBuckets[type];
                     const count = Math.max(tBucket.length, nBucket.length);
 
                     if (count > 0) {
-                        upgradedReport.push(`\n## 📝 ${type} Internal Review`);
+                        upgradedReport.push(`\n## Round ${roundIdx}: ${type}`);
                         for (let i = 0; i < count; i++) {
                             const interaction = tBucket[i];
                             const note = nBucket[i];
 
-                            upgradedReport.push(`\n---\n### 🗨️ ${type} - Interaction ${globalInteractionIdx++}`);
-                            upgradedReport.push(`**Interviewer (AI):**\n${interaction?.q || "Follow-up question"}`);
-                            if (interaction?.r) upgradedReport.push(`\n**Candidate Reply:**\n> ${interaction.r}`);
-                            if (note) upgradedReport.push(`\n#### 🔍 AI Evaluation\n${note}`);
-                            upgradedReport.push("\n---");
+                            upgradedReport.push(`- **Interviewer (AI):** ${interaction?.q || "Follow-up question"}`);
+                            if (interaction?.r) upgradedReport.push(`- **Candidate Reply:** ${interaction.r}`);
+                            if (note) {
+                                // Indent the note to fit under the list item
+                                const formattedNote = note.split('\n').map(l => `  ${l}`).join('\n');
+                                upgradedReport.push(`- **AI Evaluation:** \n${formattedNote}`);
+                            }
+                            upgradedReport.push(""); // Spacer
                         }
                     }
                 }

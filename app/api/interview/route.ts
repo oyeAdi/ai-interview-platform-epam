@@ -1047,7 +1047,7 @@ IMPORTANT: DO NOT ask about these topics again. Choose NEW, DIFFERENT topics.`
           {
             "text": "Your spoken question or response to the candidate.",
             "score": 0-10, // Score for their last response (10=perfect, 0=wrong/blank)
-            "candidateNote": "- **Score:** X/10\\n- **Topic:** Skill Area\\n- **Analysis:** Professional, concise assessment of the candidate's response logic, technical depth, and accuracy.",
+            "candidateNote": " -SCORE: X/10\\n -TOPIC: Skill Area\\n - Analysis: Professional assessment...",
             "codeSnippet": "${roleType === 'TECHNICAL' && roundNum === 2 ? 'Starter code here' : roundNum === 2 ? 'Analysis framework' : ''}"
           }
 

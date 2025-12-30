@@ -51,6 +51,7 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
     const chunksRef = useRef<Blob[]>([]);
     const messagesRef = useRef<Message[]>([]);
     const hasInitializedRef = useRef(false);
+    const roundsReportedRef = useRef<Record<string, boolean>>({});
     const videoRef = useRef<HTMLVideoElement>(null);
     const activeStreamsRef = useRef<MediaStream[]>([]);
 
@@ -112,22 +113,20 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
 
                 if (data.candidateNote && data.candidateNote.trim().length > 5) {
                     const roundKey = activeRound === 'SYSTEM_DESIGN' ? 'SYSTEM_DESIGN' : activeRound;
-                    setRoundSummaries(prev => ({
-                        ...prev,
-                        [roundKey]: [...(prev[roundKey] || []), data.candidateNote]
-                    }));
-
+                    const roundNum = activeRound === 'MCQ' ? 0 : activeRound === 'CONCEPTUAL' ? 1 : activeRound === 'CODING' ? 2 : 3;
                     const roundTitle = activeRound.charAt(0) + activeRound.slice(1).toLowerCase().replace('_', ' ');
 
-                    const triplet = `
----
-### 🗨️ ${roundTitle} - Note
-**Context:**
-${initialMessages[initialMessages.length - 1].text}
+                    let header = "";
+                    if (!roundsReportedRef.current[activeRound]) {
+                        header = `\n## Round ${roundNum}: ${roundTitle}\n`;
+                        roundsReportedRef.current[activeRound] = true;
+                    }
 
-#### 🔍 AI Evaluation
+                    const triplet = `${header}
+- **Interviewer (AI):** ${initialMessages[initialMessages.length - 1].text}
+- **Candidate Reply:** Initialization
+- **AI Evaluation:**
 ${data.candidateNote}
----
 `;
                     setTechnicalReport(prev => prev + triplet);
                 }
@@ -362,26 +361,21 @@ ${data.candidateNote}
 
                 if (data.candidateNote && data.candidateNote.trim().length > 5) {
                     const roundKey = currentRound === 'SYSTEM_DESIGN' ? 'SYSTEM_DESIGN' : currentRound;
-                    setRoundSummaries(prev => ({
-                        ...prev,
-                        [roundKey]: [...(prev[roundKey] || []), data.candidateNote]
-                    }));
-
+                    const roundNum = currentRound === 'MCQ' ? 0 : currentRound === 'CONCEPTUAL' ? 1 : currentRound === 'CODING' ? 2 : 3;
                     const roundTitle = currentRound.charAt(0) + currentRound.slice(1).toLowerCase().replace('_', ' ');
 
+                    let header = "";
+                    if (!roundsReportedRef.current[currentRound]) {
+                        header = `\n## Round ${roundNum}: ${roundTitle}\n`;
+                        roundsReportedRef.current[currentRound] = true;
+                    }
+
                     // STRUCTURED TRIPLET CAPTURE
-                    const triplet = `
----
-### 🗨️ ${roundTitle} - Question ${questionCount + 1}
-**Interviewer (AI):**
-${currentQuestion || "Opening question"}
-
-**Candidate Reply:**
-> ${userInput}
-
-#### 🔍 AI Evaluation
+                    const triplet = `${header}
+- **Interviewer (AI):** ${currentQuestion || "Opening question"}
+- **Candidate Reply:** ${userInput}
+- **AI Evaluation:** 
 ${data.candidateNote}
----
 `;
                     setTechnicalReport(prev => prev + triplet);
                 }
