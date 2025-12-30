@@ -34,10 +34,6 @@ export async function POST(req: NextRequest) {
         if (!transcriptDataRes.error) {
             try {
                 const fullTranscript = JSON.parse(await transcriptDataRes.data.text());
-                // Filter for candidate (user) role only, starting after Round 0 (MCQ)
-                // In our current flow, Round 0 is the first set of messages. 
-                // However, detecting "Round 0" index in a flat message list is tricky.
-                // We'll trust the LLM prompt to focus on everything except MCQ, but we'll provide ONLY candidate lines.
                 const candidateMessages = Array.isArray(fullTranscript)
                     ? fullTranscript.filter((m: any) => m.role === 'user' && m.text && !m.text.includes('Start the interview'))
                     : [];
@@ -65,13 +61,13 @@ export async function POST(req: NextRequest) {
             - Highly generic but technically correct answers that lack specific personal experience or proprietary context.
             
             CANDIDATE REPLIES FOR ANALYSIS:
-            ${filteredCandidateReplies}
+            \${filteredCandidateReplies}
             
             ### ACTUAL IMPLEMENTATION EVALUATION
             The report contains a "FINAL WORKSPACE CAPTURE" section. You MUST evaluate the quality and correctness of the actual code or system design provided.
             
             Report Content:
-            ${reportContent}
+            \${reportContent}
 
             IMPORTANT: Respond ONLY in strict JSON format:
             {
@@ -83,7 +79,7 @@ export async function POST(req: NextRequest) {
                     "improvements": ["...", "..."]
                 },
                 "plagiarism_check": {
-                    "score": 0-100, // Confidence level that the candidate used AI (0=Human, 100=AI)
+                    "score": 0-100,
                     "verdict": "Likely Human / Suspicious / Likely AI",
                     "reasoning": "Brief explanation focused only on the candidate's replies."
                 },
@@ -95,7 +91,6 @@ export async function POST(req: NextRequest) {
 
         const { text } = await LLMRouter.generate(systemPrompt, userPrompt, 0.2);
 
-        // Clean and Parse LLM Response
         let cleanJson = text;
         if (text.includes('```json')) {
             cleanJson = text.split('```json')[1].split('```')[0].trim();
@@ -105,14 +100,15 @@ export async function POST(req: NextRequest) {
 
         const summary = JSON.parse(cleanJson);
 
-        // 3. Report Upgrade Logic (Reconstruct triplets for legacy reports)
-        // If the report is in the old format (doesn't have triplets), attempt to rebuild it
+        // 3. Modular Reporting - Prepare to split
+        let protocolToSplit = reportContent;
+
+        // 4. Report Upgrade Logic (If legacy)
         if (!reportContent.includes('### 🗨️') && !transcriptDataRes.error) {
             try {
                 console.log('[Finalize API] Starting bucket-based report upgrade...');
                 const fullTranscript = JSON.parse(await transcriptDataRes.data.text());
 
-                // 1. Extract Notes into Buckets
                 const noteBuckets: Record<string, string[]> = {
                     'Mcq': [],
                     'Conceptual': [],
@@ -120,19 +116,14 @@ export async function POST(req: NextRequest) {
                     'System Design': []
                 };
 
-                // Pattern: ### [Round] - Note:\s*[Content]
-                // Stop before: next ### OR next [Round] - Note: OR FINAL
-                const noteRegex = /(Mcq|Conceptual|Coding|System [Dd]esign) - Note:\s*([\s\S]*?)(?=\n(?:Mcq|Conceptual|Coding|System [Dd]esign) - Note:|\n###|\nFINAL|$)/g;
+                const noteRegex = /(Mcq|Conceptual|Coding|System [Dd]esign) - Note:\\s*([\\s\\S]*?)(?=\\n(?:Mcq|Conceptual|Coding|System [Dd]esign) - Note:|\\n###|\\nFINAL|$)/g;
                 let match;
                 while ((match = noteRegex.exec(reportContent)) !== null) {
                     const type = match[1];
                     const content = match[2].trim();
-                    if (noteBuckets[type]) {
-                        noteBuckets[type].push(content);
-                    }
+                    if (noteBuckets[type]) noteBuckets[type].push(content);
                 }
 
-                // 2. Extract Transcript into Buckets
                 const transcriptBuckets: Record<string, { q: string, r: string }[]> = {
                     'Mcq': [],
                     'Conceptual': [],
@@ -140,29 +131,23 @@ export async function POST(req: NextRequest) {
                     'System Design': []
                 };
 
-                let currentBucket = 'Mcq'; // Start with MCQ
+                let currentBucket = 'Mcq';
                 let lastQuestion = "Opening question";
 
                 for (const msg of fullTranscript) {
                     if (msg.role === 'model') {
-                        // Detect round transitions in AI speech
-                        const text = msg.text.toLowerCase();
-                        if (text.includes('conceptual discussion') || text.includes('shift gears into a more conceptual')) currentBucket = 'Conceptual';
-                        else if (text.includes('coding assessment') || text.includes('practical coding')) currentBucket = 'Coding';
-                        else if (text.includes('system design discussion') || text.includes('move into a system design')) currentBucket = 'System Design';
-
+                        const lowText = msg.text.toLowerCase();
+                        if (lowText.includes('conceptual discussion') || lowText.includes('shift gears into a more conceptual')) currentBucket = 'Conceptual';
+                        else if (lowText.includes('coding assessment') || lowText.includes('practical coding')) currentBucket = 'Coding';
+                        else if (lowText.includes('system design discussion') || lowText.includes('move into a system design')) currentBucket = 'System Design';
                         lastQuestion = msg.text;
                     } else if (msg.role === 'user') {
                         const isTrigger = /start the interview/i.test(msg.text) || (msg.text.length < 20 && /start/i.test(msg.text));
-                        if (!isTrigger) {
-                            transcriptBuckets[currentBucket].push({ q: lastQuestion, r: msg.text });
-                        }
+                        if (!isTrigger) transcriptBuckets[currentBucket].push({ q: lastQuestion, r: msg.text });
                     }
                 }
 
                 const upgradedReport = ["# 📋 Interview Protocol (Upgraded)\n"];
-
-                // 3. Mesh Buckets
                 const order = ['Mcq', 'Conceptual', 'Coding', 'System Design'];
                 for (let roundIdx = 0; roundIdx < order.length; roundIdx++) {
                     const type = order[roundIdx];
@@ -175,67 +160,107 @@ export async function POST(req: NextRequest) {
                         for (let i = 0; i < count; i++) {
                             const interaction = tBucket[i];
                             const note = nBucket[i];
-
                             upgradedReport.push(`- **Interviewer (AI):** ${interaction?.q || "Follow-up question"}`);
                             if (interaction?.r) upgradedReport.push(`- **Candidate Reply:** ${interaction.r}`);
                             if (note) {
-                                // Indent the note to fit under the list item
                                 const formattedNote = note.split('\n').map(l => `  ${l}`).join('\n');
                                 upgradedReport.push(`- **AI Evaluation:** \n${formattedNote}`);
                             }
-                            upgradedReport.push(""); // Spacer
+                            upgradedReport.push("");
                         }
                     }
                 }
 
-                // 4. Capture Final Workspaces (avoiding duplicates)
-                const capturedWorkspaces = new Set<string>();
                 const finalSections = reportContent.split(/(?=FINAL (?:CODING|SYSTEM_DESIGN) WORKSPACE CAPTURE)/);
                 for (const section of finalSections) {
-                    if (section.startsWith('FINAL')) {
-                        const cleanSection = section.trim();
-                        if (!capturedWorkspaces.has(cleanSection)) {
-                            upgradedReport.push("\n\n" + cleanSection);
-                            capturedWorkspaces.add(cleanSection);
-                        }
-                    }
+                    if (section.startsWith('FINAL')) upgradedReport.push("\n\n" + section.trim());
                 }
 
-                const finalMarkdown = upgradedReport.join('\n');
+                protocolToSplit = upgradedReport.join('\n');
 
-                // Save upgraded report
+                // Save upgraded consolidated report
                 await supabaseAdmin.storage
                     .from('assessment-data')
-                    .upload(reportStoragePath, finalMarkdown, {
+                    .upload(reportStoragePath, protocolToSplit, {
                         contentType: 'text/markdown',
                         upsert: true
                     });
-
-                console.log(`[Finalize API] Bucket upgrade complete. MCQ: ${noteBuckets['Mcq'].length}, Conceptual: ${noteBuckets['Conceptual'].length}`);
-            } catch (upgradeErr) {
-                console.warn('[Finalize API] Bucket upgrade failed:', upgradeErr);
+            } catch (err) {
+                console.warn('[Finalize API] Upgrade failed', err);
             }
         }
 
-        // 4. Save synthesis back to Supabase Storage
-        const { error: uploadError } = await supabaseAdmin.storage
+        // 5. Modular Reporting: Split protocol into individual round files
+        const rounds = protocolToSplit.split(/(?=\n## Round \d+:)/);
+        for (let i = 0; i < rounds.length; i++) {
+            const roundContent = rounds[i].trim();
+            if (roundContent) {
+                const roundMatch = roundContent.match(/## Round (\d+):/);
+                const roundNum = roundMatch ? roundMatch[1] : i;
+                const roundFileName = `sessions/${folder}/protocol_round_${roundNum}.md`;
+
+                await supabaseAdmin.storage
+                    .from('assessment-data')
+                    .upload(roundFileName, roundContent, {
+                        contentType: 'text/markdown',
+                        upsert: true
+                    });
+            }
+        }
+
+        // 6. Generate Executive Summary Markdown
+        const executiveSummaryMd = `
+# 📈 Executive Summary: ${summary.overall_summary}
+
+## 🎯 Verdict Panel
+**STATUS:** ${summary.verdict === 'Hired' ? '✅ HIRED' : '❌ NOT HIRED'}
+**REASON:** ${summary.reason}
+
+---
+
+## 🛡️ Integrity & Plagiarism Check
+**Score:** ${summary.plagiarism_check.score}/100
+**Verdict:** ${summary.plagiarism_check.verdict}
+**Reasoning:** ${summary.plagiarism_check.reasoning}
+
+---
+
+## 📊 Evaluation Breakdown
+- **Technical Skills:** ${summary.technical}
+- **Behavioral Fit:** ${summary.behavioral}
+- **Communication:** ${summary.communication}
+
+### 🌟 Strengths
+${summary.feedback.strengths.map((s: string) => `- ${s}`).join('\n')}
+
+### 🚀 Areas for Improvement
+${summary.feedback.improvements.map((i: string) => `- ${i}`).join('\n')}
+
+---
+*Generated by EPAM AI Diagnostic Engine*
+`.trim();
+
+        const execSummaryPath = `sessions/${folder}/executive_summary.md`;
+        await supabaseAdmin.storage
+            .from('assessment-data')
+            .upload(execSummaryPath, executiveSummaryMd, {
+                contentType: 'text/markdown',
+                upsert: true
+            });
+
+        // 7. Save LLM synthesis JSON
+        await supabaseAdmin.storage
             .from('assessment-data')
             .upload(finalStoragePath, JSON.stringify(summary, null, 2), {
                 contentType: 'application/json',
                 upsert: true
             });
 
-        if (uploadError) throw uploadError;
-
-        // 4. Update Database to mark as finalized
-        const { error: dbError } = await supabaseAdmin
+        // 8. Update Session Record
+        await supabaseAdmin
             .from('assessment_sessions')
             .update({ has_feedback: true })
             .eq('session_id', folder);
-
-        if (dbError) {
-            console.warn('[Finalize API] Database update error:', dbError.message);
-        }
 
         return NextResponse.json(summary);
     } catch (error: any) {

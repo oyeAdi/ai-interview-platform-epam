@@ -18,7 +18,10 @@ export async function POST(req: NextRequest) {
         const candidateEmail = formData.get('candidateEmail') as string || '';
         const timestamp = formData.get('timestamp') as string || new Date().toISOString().replace(/[:.]/g, '-');
 
-        const sessionId = `session_${jobId}_${timestamp}`;
+        let sessionId = formData.get('sessionId') as string;
+        if (!sessionId) {
+            sessionId = `session_${jobId}_${timestamp}`;
+        }
 
         // 1. Upload Transcript to Supabase
         let transcriptUrl = '';
@@ -81,7 +84,8 @@ export async function POST(req: NextRequest) {
                 transcript_url: transcriptUrl,
                 report_url: reportUrl,
                 recording_url: recordingUrl, // This now points to Firebase
-                created_at: new Date().toISOString()
+                updated_at: new Date().toISOString(),
+                created_at: new Date().toISOString() // created_at will be ignored on update if using standard upsert behavior or if handled by DB
             });
 
         if (dbError) throw dbError;

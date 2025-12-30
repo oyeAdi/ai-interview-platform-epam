@@ -807,7 +807,23 @@ For Behavioral Questions: Competency-based assessment`;
             ? (round === 'MCQ' ? 0 : round === 'CONCEPTUAL' ? 1 : round === 'CODING' ? 2 : 3)
             : round;
 
-        // Extract previous topics/questions from conversation history
+        // Construct summary context from previous rounds
+        const summariesContext = Object.entries(summaries || {})
+            .filter(([key, notes]) => (notes as string[]).length > 0 && key !== round)
+            .map(([roundKey, notes]) => {
+                const roundTitle = roundKey.charAt(0) + roundKey.slice(1).toLowerCase().replace('_', ' ');
+                return `### PREVIOUS ROUND INSIGHTS: ${roundTitle}\n${(notes as string[]).slice(-5).join('\n')}`; // Keep last 5 notes per round for brevity
+            })
+            .join('\n\n');
+
+        // Context Trimming: If it's a new round, prune history to avoid "brain fog"
+        let processedMessages = messages;
+        if (isNewRound && messages.length > 3) {
+            // Keep the very first message (start intent) and the last 2 (transition context)
+            processedMessages = [messages[0], ...messages.slice(-2)];
+        }
+
+        // Extract previous topics/questions from conversation history (do this BEFORE trimming for full coverage)
         const previousTopics = extractPreviousTopics(messages, roundNum);
         console.log(`DEBUG: Previous topics for round ${roundNum}:`, previousTopics);
 
@@ -1033,8 +1049,13 @@ IMPORTANT: DO NOT ask about these topics again. Choose NEW, DIFFERENT topics.`
           - Reset your mental context for this round type.
           - Start with an appropriate opening question/statement.` : ''}
 
+          ${summariesContext ? `
+### KNOWLEDGE ACQUIRED FROM PREVIOUS ROUNDS:
+${summariesContext}
+        ` : ''}
+
           ### REAL INTERVIEW BEHAVIOR:
-          - Remember what has been discussed
+          - Remember what has been discussed (use the summaries above as your primary "memory" for past rounds)
           - Build upon previous answers
           - Ask follow-up questions that show you're listening
           - Avoid robotic, repetitive questioning
@@ -1062,8 +1083,8 @@ IMPORTANT: DO NOT ask about these topics again. Choose NEW, DIFFERENT topics.`
         `;
 
         // Combine messages into a single user prompt
-        const lastUserMessage = messages[messages.length - 1]?.text || '';
-        const history = messages.slice(0, -1).map((m: any) => `${m.role === 'user' ? 'CANDIDATE' : 'INTERVIEWER'}: ${m.text}`).join('\n');
+        const lastUserMessage = processedMessages[processedMessages.length - 1]?.text || '';
+        const history = processedMessages.slice(0, -1).map((m: any) => `${m.role === 'user' ? 'CANDIDATE' : 'INTERVIEWER'}: ${m.text}`).join('\n');
 
         const fullUserPrompt = `
         ### INTERVIEW HISTORY (READ CAREFULLY - REMEMBER THIS):

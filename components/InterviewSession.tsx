@@ -19,12 +19,14 @@ interface InterviewSessionProps {
         systemDesign?: { enabled?: boolean };
     };
     onFinish: (transcript: Message[], summaries: string[], recordingBlob: Blob | null, fullReport: string) => void;
+    onCheckpoint?: (transcript: Message[], fullReport: string) => void;
     onPermissionDenied?: () => void;
+    isTerminated?: boolean;
 }
 
 type Round = 'MCQ' | 'CONCEPTUAL' | 'CODING' | 'SYSTEM_DESIGN';
 
-export default function InterviewSession({ selectedJobId, customSkills = [], candidateName = "Candidate", mode = 'DM', config, onFinish, onPermissionDenied }: InterviewSessionProps) {
+export default function InterviewSession({ selectedJobId, customSkills = [], candidateName = "Candidate", mode = 'DM', config, onFinish, onCheckpoint, onPermissionDenied, isTerminated }: InterviewSessionProps) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [technicalReport, setTechnicalReport] = useState<string>('');
     const [input, setInput] = useState('');
@@ -78,7 +80,7 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
         const activeRound = targetRound || currentRound;
         const roundNum = activeRound === 'MCQ' ? 0 : activeRound === 'CONCEPTUAL' ? 1 : activeRound === 'CODING' ? 2 : 3;
 
-        const initialMessages = customPrompt
+        const initialMessages: Message[] = customPrompt
             ? [...messages, { role: 'user', text: customPrompt }]
             : (messages.length > 0 ? messages : [{ role: 'user', text: 'Start the interview.' }]);
 
@@ -91,6 +93,7 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
                     selectedJobId,
                     type: 'chat',
                     round: roundNum,
+                    summaries: roundSummaries, // Pass the collected evaluations for context compression
                     customSkills,
                     isNewRound,
                     currentQuestion: messages.length > 0 ? currentQuestion : "",
@@ -113,6 +116,11 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
 
                 if (data.candidateNote && data.candidateNote.trim().length > 5) {
                     const roundKey = activeRound === 'SYSTEM_DESIGN' ? 'SYSTEM_DESIGN' : activeRound;
+                    setRoundSummaries(prev => ({
+                        ...prev,
+                        [roundKey]: [...(prev[roundKey] || []), data.candidateNote]
+                    }));
+
                     const roundNum = activeRound === 'MCQ' ? 0 : activeRound === 'CONCEPTUAL' ? 1 : activeRound === 'CODING' ? 2 : 3;
                     const roundTitle = activeRound.charAt(0) + activeRound.slice(1).toLowerCase().replace('_', ' ');
 
@@ -128,7 +136,11 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
 - **AI Evaluation:**
 ${data.candidateNote}
 `;
-                    setTechnicalReport(prev => prev + triplet);
+                    setTechnicalReport(prev => {
+                        const next = prev + triplet;
+                        if (onCheckpoint) onCheckpoint(initialMessages, next);
+                        return next;
+                    });
                 }
             } else {
                 setMessages((prev) => [...prev, { role: 'model', text: "Ready. Let's begin." }]);
@@ -346,8 +358,13 @@ ${data.candidateNote}
                     selectedJobId,
                     type: 'chat',
                     round: roundNum,
-                    currentQuestion,
-                    customInstructions: config?.customInstructions
+                    summaries: roundSummaries, // Pass for context compression
+                    code: currentRound === 'CODING' || currentRound === 'SYSTEM_DESIGN' ? code : "",
+                    currentQuestion: currentQuestion,
+                    customSkills,
+                    customInstructions: config?.customInstructions,
+                    codingFocusAreas: config?.coding?.focusAreas,
+                    isNewRound: false
                 }),
             });
             const data = await res.json();
@@ -361,6 +378,11 @@ ${data.candidateNote}
 
                 if (data.candidateNote && data.candidateNote.trim().length > 5) {
                     const roundKey = currentRound === 'SYSTEM_DESIGN' ? 'SYSTEM_DESIGN' : currentRound;
+                    setRoundSummaries(prev => ({
+                        ...prev,
+                        [roundKey]: [...(prev[roundKey] || []), data.candidateNote]
+                    }));
+
                     const roundNum = currentRound === 'MCQ' ? 0 : currentRound === 'CONCEPTUAL' ? 1 : currentRound === 'CODING' ? 2 : 3;
                     const roundTitle = currentRound.charAt(0) + currentRound.slice(1).toLowerCase().replace('_', ' ');
 
@@ -377,7 +399,11 @@ ${data.candidateNote}
 - **AI Evaluation:** 
 ${data.candidateNote}
 `;
-                    setTechnicalReport(prev => prev + triplet);
+                    setTechnicalReport(prev => {
+                        const next = prev + triplet;
+                        if (onCheckpoint) onCheckpoint(newHistory, next);
+                        return next;
+                    });
                 }
 
                 // If it was the last question, transition now AFTER processing the reply
@@ -392,7 +418,13 @@ ${data.candidateNote}
         }
     };
 
-    // --- Media Setup ---
+    useEffect(() => {
+        if (isTerminated && isActive) {
+            console.log("[InterviewSession] Termination triggered externally...");
+            finishInterview();
+        }
+    }, [isTerminated, isActive]);
+
     useEffect(() => {
         const setupRecording = async () => {
             if (hasInitializedRef.current) return;

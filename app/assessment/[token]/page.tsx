@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { JobDescription } from '@/types';
 import interviewData from '@/data/interview_config.json';
 import InterviewSession from '@/components/InterviewSession';
+import AssessmentShield from '@/components/AssessmentShield';
 import { Loader2, AlertCircle, Play, CheckCircle } from 'lucide-react';
 
 interface SessionToken {
@@ -25,6 +26,8 @@ export default function AssessmentLanding() {
     const [started, setStarted] = useState(false);
     const [completed, setCompleted] = useState(false);
     const [permissionDenied, setPermissionDenied] = useState(false);
+    const [isTerminated, setIsTerminated] = useState(false);
+    const [sessionId, setSessionId] = useState('');
 
     useEffect(() => {
         try {
@@ -52,6 +55,11 @@ export default function AssessmentLanding() {
                 }
 
                 setTokenData(data);
+
+                // Generate a stable Session ID immediately
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                const jobId = data.jobId || 'unknown';
+                setSessionId(`session_${jobId}_${timestamp}`);
             } else {
                 setError("Invalid assessment link.");
             }
@@ -68,7 +76,6 @@ export default function AssessmentLanding() {
         try {
             const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
             const jobId = tokenData?.jobId || 'unknown';
-            const sessionId = `session_${jobId}_${timestamp}`;
             let recordingPath = '';
 
             // 1. Direct Upload to Firebase if recording exists
@@ -104,6 +111,7 @@ export default function AssessmentLanding() {
             formData.append('transcript', JSON.stringify(messages, null, 2));
             formData.append('report', fullReport);
             formData.append('jobId', jobId);
+            formData.append('sessionId', sessionId);
             formData.append('timestamp', timestamp);
             formData.append('candidateName', tokenData?.candidateName || 'Unknown');
             formData.append('candidateEmail', tokenData?.candidateEmail || '');
@@ -118,6 +126,26 @@ export default function AssessmentLanding() {
             });
         } catch (err) {
             console.error("Archive failed", err);
+        }
+    };
+
+    const handleCheckpoint = async (transcript: any[], fullReport: string) => {
+        try {
+            const formData = new FormData();
+            formData.append('transcript', JSON.stringify(transcript, null, 2));
+            formData.append('report', fullReport);
+            formData.append('jobId', tokenData?.jobId || 'unknown');
+            formData.append('sessionId', sessionId); // Pass the stable ID
+            formData.append('candidateName', tokenData?.candidateName || 'Unknown');
+            formData.append('candidateEmail', tokenData?.candidateEmail || '');
+
+            // Optimized checkpoint: No recording blob, just metadata
+            fetch('/api/archive', {
+                method: 'POST',
+                body: formData,
+            }).catch(err => console.error("Checkpoint failed (background)", err));
+        } catch (err) {
+            console.error("Checkpoint handler failed", err);
         }
     };
 
@@ -184,15 +212,29 @@ export default function AssessmentLanding() {
     if (started && tokenData) {
         return (
             <div className="min-h-screen bg-[#F8FAFC]">
-                <InterviewSession
-                    selectedJobId={tokenData.jobId}
-                    customSkills={tokenData.skills}
-                    onFinish={handleFinish}
-                    onPermissionDenied={() => setPermissionDenied(true)}
-                    candidateName={tokenData.candidateName}
-                    mode="CANDIDATE"
-                    config={tokenData.config}
-                />
+                <AssessmentShield
+                    sessionId={sessionId}
+                    onViolation={(type, details) => {
+                        console.warn(`[Assessment] Security Violation: ${type} - ${details}`);
+                        // Trigger an immediate checkpoint with the violation info
+                        handleCheckpoint([], `\n> [!CAUTION]\n> **Security Violation Detected**: ${type}\n> Details: ${details}\n> Timestamp: ${new Date().toISOString()}\n`);
+                    }}
+                    onTerminate={() => {
+                        setIsTerminated(true);
+                    }}
+                >
+                    <InterviewSession
+                        selectedJobId={tokenData.jobId}
+                        customSkills={tokenData.skills}
+                        onFinish={handleFinish}
+                        onCheckpoint={handleCheckpoint}
+                        onPermissionDenied={() => setPermissionDenied(true)}
+                        candidateName={tokenData.candidateName}
+                        mode="CANDIDATE"
+                        config={tokenData.config}
+                        isTerminated={isTerminated}
+                    />
+                </AssessmentShield>
             </div>
         );
     }
