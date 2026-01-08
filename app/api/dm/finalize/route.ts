@@ -49,25 +49,32 @@ export async function POST(req: NextRequest) {
         }
 
         // 2. Synthesis Logic (LLM)
-        const systemPrompt = "You are a Senior Delivery Manager at EPAM and an expert in AI-generated content detection. Provide a final structured assessment and evaluate the likelihood of AI usage based ONLY on the candidate's verbal replies.";
+        const systemPrompt = "You are a Senior Delivery Manager at EPAM and a world-class expert in AI-generated content detection. Your task is to provide a final structured assessment and evaluate the likelihood of AI usage based ONLY on the candidate's verbal replies. You must be extremely observant of technical robotic-ness and lack of personal nuance.";
         const userPrompt = `
             Analyze this interview report and the CANDIDATE'S responses from the transcript to provide a high-level summary for the Delivery Manager.
             
             ### CRITICAL: PLAGIARISM / AI DETECTION
-            Analyze the SPECIFIC CANDIDATE REPLIES below for patterns typical of AI (ChatGPT/Claude):
-            - Perfectly structured lists and "hallmarks" of LLM writing style.
-            - Overly formal, robotic, or repetitive transition phrases (e.g., "Certainly!", "In conclusion", "Moreover").
-            - Perfect grammar and lack of natural conversational fillers/hesitations.
-            - Highly generic but technically correct answers that lack specific personal experience or proprietary context.
+            Analyze the SPECIFIC CANDIDATE REPLIES below for patterns typical of AI (ChatGPT/Claude/Gemini):
+            - Perfectly structured lists (1, 2, 3) where a human would speak more fluidly.
+            - Overly formal, robotic, or repetitive transition phrases (e.g., "Certainly!", "In conclusion", "Moreover", "Furthermore").
+            - Lack of natural conversational fillers, hesitations, or "um/uh" (if transcript allows).
+            - "Vanilla" technical accuracy: technically correct but lacking specific personal anecdotes, EPAM-specific context, or proprietary project experience.
+            - hall-marks of LLM "safety" or "objectivity" that sounds unnatural in an interview.
+            
+            SCORING GUIDELINE:
+            - 0-30%: Likely Human (Natural speech, personal stories, specific examples).
+            - 31-60%: Suspicious (Technically sound but suspiciously clean or structured).
+            - 61-80%: Likely AI (Generic, structured, robotic, no personal anecdotes. A score like 65% often indicates a "standardized" response that matches AI training patterns perfectly).
+            - 81-100%: Confirmed AI (Word-for-word AI output patterns, perfectly indexed lists).
             
             CANDIDATE REPLIES FOR ANALYSIS:
-            \${filteredCandidateReplies}
+            ${filteredCandidateReplies}
             
             ### ACTUAL IMPLEMENTATION EVALUATION
             The report contains a "FINAL WORKSPACE CAPTURE" section. You MUST evaluate the quality and correctness of the actual code or system design provided.
             
             Report Content:
-            \${reportContent}
+            ${reportContent}
 
             IMPORTANT: Respond ONLY in strict JSON format:
             {
@@ -80,8 +87,8 @@ export async function POST(req: NextRequest) {
                 },
                 "plagiarism_check": {
                     "score": 0-100,
-                    "verdict": "Likely Human / Suspicious / Likely AI",
-                    "reasoning": "Brief explanation focused only on the candidate's replies."
+                    "verdict": "Likely Human / Suspicious / Likely AI / Confirmed AI",
+                    "reasoning": "Detailed breakdown: Why this specific score? (e.g., 'Candidate's replies match common LLM structure with perfectly indexed lists and generic technical definitions')."
                 },
                 "overall_summary": "A 2-sentence executive summary...",
                 "verdict": "Hired / Not Hired",

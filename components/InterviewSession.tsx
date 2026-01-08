@@ -661,37 +661,21 @@ ${data.candidateNote}
                             <p className="text-xs font-bold uppercase tracking-widest text-[#0095A9]">Initializing Protocol...</p>
                         </div>
                     )}
-                    {messages.map((m, i) => {
-                        const isTechnicalBlock = m.role === 'model' && (
-                            m.text.includes('Problem #') ||
-                            m.text.includes('ROUND 2') ||
-                            m.text.includes('ROUND 3') ||
-                            m.text.includes('```')
-                        );
-
-                        let displayChatText = m.text;
-                        if (isTechnicalBlock) {
-                            const segments = m.text.split(/Problem #\d+|ROUND \d|```/gi);
-                            const preamble = segments[0]?.trim();
-                            displayChatText = preamble && preamble.length > 5 ? preamble : "Please refer to the technical workspace for your next task.";
-                        }
-
-                        return (
-                            <div key={i} className={clsx("flex flex-col group", m.role === 'user' ? "items-end" : "items-start")}>
-                                <div className={clsx(
-                                    "max-w-[90%] p-4 rounded-3xl text-[13.5px] leading-relaxed shadow-sm transition-all duration-300",
-                                    m.role === 'user'
-                                        ? "bg-[#0095A9] text-white rounded-tr-none hover:-translate-y-0.5"
-                                        : "bg-slate-50 text-slate-700 rounded-tl-none border border-slate-200 hover:-translate-y-0.5"
-                                )}>
-                                    <p className="whitespace-pre-wrap font-medium">{displayChatText}</p>
-                                </div>
-                                <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest mt-2 px-1">
-                                    {m.role === 'user' ? 'Candidate' : 'Examiner'}
-                                </span>
+                    {messages.map((m, i) => (
+                        <div key={i} className={clsx("flex flex-col group", m.role === 'user' ? "items-end" : "items-start")}>
+                            <div className={clsx(
+                                "max-w-[90%] p-4 rounded-3xl text-[13.5px] leading-relaxed shadow-sm transition-all duration-300",
+                                m.role === 'user'
+                                    ? "bg-[#0095A9] text-white rounded-tr-none hover:-translate-y-0.5"
+                                    : "bg-slate-50 text-slate-700 rounded-tl-none border border-slate-200 hover:-translate-y-0.5"
+                            )}>
+                                <p className="whitespace-pre-wrap font-medium">{m.text}</p>
                             </div>
-                        );
-                    })}
+                            <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest mt-2 px-1">
+                                {m.role === 'user' ? 'Candidate' : 'Examiner'}
+                            </span>
+                        </div>
+                    ))}
                     {isLoading && (
                         <div className="flex items-start gap-4">
                             <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 rounded-tl-none flex gap-2">
