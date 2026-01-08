@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Play, FileText, Calendar, User, Search, Monitor, ShieldCheck, CheckCircle2, AlertCircle, RefreshCw, Shield } from 'lucide-react';
+import { Play, FileText, Calendar, User, Search, Monitor, ShieldCheck, CheckCircle2, AlertCircle, RefreshCw, Shield, Trash2, X, AlertTriangle } from 'lucide-react';
 import GlobalHeader from '@/components/GlobalHeader';
 import ReactMarkdown from 'react-markdown';
 import { clsx, type ClassValue } from 'clsx';
@@ -31,6 +31,10 @@ export default function Dashboard() {
     const [finalFeedback, setFinalFeedback] = useState<any>(null);
     const [isFinalizing, setIsFinalizing] = useState(false);
     const [activeTab, setActiveTab] = useState<'verdict' | 'video' | 'protocol'>('verdict');
+
+    // DELTE FLOW STATE
+    const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     useEffect(() => {
         fetch('/api/dm/sessions')
@@ -110,6 +114,42 @@ export default function Dashboard() {
         }
     };
 
+    const handleDeleteSession = async (secretKey: string) => {
+        if (!sessionToDelete) return;
+        setIsDeleting(true);
+        try {
+            const res = await fetch('/api/dm/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    sessionId: sessionToDelete.id,
+                    folderName: sessionToDelete.folderName,
+                    secretKey
+                })
+            });
+
+            const data = await res.json();
+
+            if (res.ok) {
+                // Remove from local list
+                const updatedSessions = sessions.filter(s => s.id !== sessionToDelete.id);
+                setSessions(updatedSessions);
+
+                // If we deleted the selected session, select the next one or null
+                if (selectedSession?.id === sessionToDelete.id) {
+                    setSelectedSession(updatedSessions.length > 0 ? updatedSessions[0] : null);
+                }
+                setSessionToDelete(null); // Close modal
+            } else {
+                alert(data.error || 'Failed to delete session');
+            }
+        } catch (err: any) {
+            alert('Delete failed: ' + err.message);
+        } finally {
+            setIsDeleting(false);
+        }
+    };
+
     if (loading) return (
         <div className="h-screen flex flex-col items-center justify-center bg-slate-50 gap-4">
             <RefreshCw size={40} className="animate-spin text-[#0095A9]" />
@@ -141,7 +181,7 @@ export default function Dashboard() {
                                 key={session.id}
                                 onClick={() => setSelectedSession(session)}
                                 className={cn(
-                                    "p-5 rounded-2xl cursor-pointer transition-all duration-300 group border-2",
+                                    "relative p-5 rounded-2xl cursor-pointer transition-all duration-300 group border-2",
                                     selectedSession?.id === session.id
                                         ? "bg-[#0095A9]/5 border-[#0095A9]/20 shadow-sm"
                                         : "bg-white border-transparent hover:bg-slate-50 hover:border-slate-100"
@@ -166,6 +206,17 @@ export default function Dashboard() {
                                         <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/50" />
                                     )}
                                 </div>
+
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSessionToDelete(session);
+                                    }}
+                                    className="absolute top-2 right-2 p-2 bg-white/80 backdrop-blur-sm rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 border border-transparent hover:border-rose-100 opacity-0 group-hover:opacity-100 transition-all duration-300 shadow-sm"
+                                    title="Delete Session"
+                                >
+                                    <Trash2 size={14} />
+                                </button>
                             </div>
                         ))}
                     </div>
@@ -409,7 +460,62 @@ export default function Dashboard() {
                     )}
                 </div>
             </div>
-        </div>
+
+            {/* DELETE MODAL */}
+            {
+                sessionToDelete && (
+                    <div className="fixed inset-0 z-[200] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+                        <div className="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl scale-100 animate-in zoom-in-95 duration-200 border border-slate-100">
+                            <div className="flex items-center justify-center w-16 h-16 bg-rose-50 rounded-full mx-auto mb-6">
+                                <AlertTriangle className="text-rose-500" size={32} />
+                            </div>
+                            <h3 className="text-xl font-black text-center text-slate-800 mb-2">Delete Session?</h3>
+                            <p className="text-center text-slate-500 text-sm mb-6 leading-relaxed">
+                                This action is <strong>irreversible</strong>. It will permanently remove the database record and all associated files for <strong>{sessionToDelete.candidateName}</strong>.
+                            </p>
+
+                            <form
+                                onSubmit={(e) => {
+                                    e.preventDefault();
+                                    const formData = new FormData(e.currentTarget);
+                                    handleDeleteSession(formData.get('secretKey') as string);
+                                }}
+                                className="space-y-4"
+                            >
+                                <div>
+                                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">DM Secret Key</label>
+                                    <input
+                                        name="secretKey"
+                                        type="password"
+                                        placeholder="Enter secret key..."
+                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm focus:outline-none focus:border-rose-500 focus:ring-1 focus:ring-rose-500 transition-all"
+                                        autoFocus
+                                        required
+                                    />
+                                </div>
+                                <div className="flex gap-3 pt-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setSessionToDelete(null)}
+                                        className="flex-1 py-3 text-sm font-bold text-slate-500 bg-slate-50 hover:bg-slate-100 rounded-xl transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        disabled={isDeleting}
+                                        className="flex-1 py-3 text-sm font-bold text-white bg-rose-500 hover:bg-rose-600 rounded-xl shadow-lg shadow-rose-500/20 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                                    >
+                                        {isDeleting ? <RefreshCw size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                                        {isDeleting ? 'Deleting...' : 'Confirm'}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )
+            }
+        </div >
     );
 }
 

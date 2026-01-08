@@ -48,6 +48,8 @@ export default function InterviewSession({ selectedJobId, customSkills = [], can
         'CODING': [],
         'SYSTEM_DESIGN': []
     });
+    const [isTransitioning, setIsTransitioning] = useState(false);
+    const [transitionMessage, setTransitionMessage] = useState('');
 
     const recorderRef = useRef<MediaRecorder | null>(null);
     const chunksRef = useRef<Blob[]>([]);
@@ -273,7 +275,14 @@ ${data.candidateNote}
         } else {
             finishInterview();
         }
-        setIsLoading(false);
+        
+        // SMOOTH TRANSITION UX
+        setTransitionMessage(`Preparing Round ${currentRound === 'MCQ' ? 2 : currentRound === 'CONCEPTUAL' ? 3 : 4}...`);
+        setIsTransitioning(true);
+        setTimeout(() => {
+             setIsTransitioning(false);
+             setIsLoading(false);
+        }, 3000);
     };
 
     const finishInterview = async () => {
@@ -439,9 +448,39 @@ ${data.candidateNote}
                 activeStreamsRef.current.push(userMediaStream);
 
                 const screenStream = await (navigator.mediaDevices as any).getDisplayMedia({
-                    video: true,
+                    video: {
+                         displaySurface: 'monitor' // Hint to browser, but we must verify
+                    },
                     audio: true
                 });
+
+                // 1. STRICT SCREEN SHARE ENFORCEMENT
+                const videoTrack = screenStream.getVideoTracks()[0];
+                const settings = videoTrack.getSettings();
+                
+                // Note: displaySurface support varies by browser, but where available we enforce it.
+                if (settings.displaySurface && settings.displaySurface !== 'monitor') {
+                     alert("Security Policy Violation:\n\nYou must share your ENTIRE SCREEN to proceed.\nWindow or Tab sharing is not allowed.");
+                     
+                     // Stop the illegal stream
+                     screenStream.getTracks().forEach((t: any) => t.stop());
+                     userMediaStream.getTracks().forEach((t: any) => t.stop());
+                     
+                     hasInitializedRef.current = false; // Allow retry
+                     // Redirect or force reload to retry
+                     window.location.reload(); 
+                     return;
+                }
+
+                // 2. DETECT "STOP SHARING" CLICK
+                videoTrack.onended = () => {
+                     if (isActive) {
+                         alert("Session Interrupted: Screen sharing was stopped.");
+                         setIsActive(false);
+                         if (onPermissionDenied) onPermissionDenied();
+                     }
+                };
+                
                 activeStreamsRef.current.push(screenStream);
 
                 const audioContext = new AudioContext();
@@ -557,6 +596,15 @@ ${data.candidateNote}
 
     return (
         <div className="fixed inset-0 z-[100] h-screen w-screen bg-[#F8FAFC] overflow-hidden flex font-sans text-slate-900">
+            {/* TRANSITION OVERLAY */}
+            {isTransitioning && (
+                <div className="absolute inset-0 z-[200] bg-[#0095A9]/95 backdrop-blur-xl flex flex-col items-center justify-center text-white animate-in fade-in duration-500">
+                    <div className="w-20 h-20 border-4 border-white/30 border-t-white rounded-full animate-spin mb-8"></div>
+                    <h2 className="text-3xl font-black tracking-tighter mb-2">ADVANCING TO NEXT ROUND</h2>
+                    <p className="text-xl font-medium opacity-80">{transitionMessage}</p>
+                </div>
+            )}
+
             {/* Sidebar (20%) */}
             <div className="w-[20%] h-full bg-white border-r border-slate-200 flex flex-col shadow-sm">
                 <div className="p-6">
