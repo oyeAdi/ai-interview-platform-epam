@@ -3,7 +3,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { JobDescription } from '@/types';
-import interviewData from '@/data/interview_config.json';
 import InterviewSession from '@/components/InterviewSession';
 import AssessmentShield from '@/components/AssessmentShield';
 import { Loader2, AlertCircle, Play, CheckCircle } from 'lucide-react';
