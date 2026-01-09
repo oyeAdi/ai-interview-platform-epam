@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import interviewData from '@/data/interview_config.json';
+import { supabaseAdmin } from '@/lib/supabase';
 import { LLMRouter } from '@/lib/llm-router';
 
 export const dynamic = 'force-dynamic';
@@ -129,7 +129,9 @@ export async function POST(req: NextRequest) {
             customSkills,
             customInstructions,
             codingFocusAreas,
-            isNewRound
+            isNewRound,
+            roundType, // V2 Dynamic Round Type
+            roundContext // V2 Dynamic Context
         } = body;
 
         if (!messages && type === 'chat') {
@@ -141,7 +143,11 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'GEMINI_API_KEY is not configured' }, { status: 500 });
         }
 
-        const selectedJob = interviewData.uber_roles.find((r) => r.id === selectedJobId);
+        let selectedJob = null;
+        if (selectedJobId) {
+            const { data } = await supabaseAdmin.from('job_roles').select('*').eq('id', selectedJobId).single();
+            selectedJob = data;
+        }
         roleType = selectedJob ? detectRoleTypeFromJob(selectedJob) : 'GENERAL';
 
         // Define types that MUST have a job
@@ -831,10 +837,14 @@ For Behavioral Questions: Competency-based assessment`;
         const globalInstruction = customInstructions
             ? `### CRITICAL: GLOBAL DM INSTRUCTIONS (HIGHEST PRIORITY)
                "${customInstructions}"
-               \nRULE: You MUST follow these instructions above all others. If there is a conflict, these win.
-               \nPHASE ADAPTATION:
-               1. Apply these HEAVILY in deep-dive rounds (Conceptual, Coding, Design).
-               2. In screening rounds (MCQ), touch on them without breaking the strict A/B/C/D format.`
+               \nRULE: You MUST follow these instructions above all others. If there is a conflict, these win.`
+            : '';
+
+        // V2 DYNAMIC ROUND CONTEXT
+        const dynamicRoundInstruction = roundContext
+            ? `\n### DYNAMIC ROUND INSTRUCTION (V2 CONFIG):
+               "${roundContext}"
+               \nRULE: This specific instruction overrides standard round behavior. Act strictly as this persona/instruction describes.`
             : '';
 
         // Role-specific adaptations
@@ -1024,6 +1034,7 @@ IMPORTANT: DO NOT ask about these topics again. Choose NEW, DIFFERENT topics.`
         // Role-specific system prompt
         const systemPrompt = `
           ${globalInstruction}
+          ${dynamicRoundInstruction}
           
           You are an EPAM ${roleType} Interviewer conducting a real interview.
           ROLE TYPE: ${roleType}

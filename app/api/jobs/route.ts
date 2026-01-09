@@ -1,25 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs/promises';
-import path from 'path';
-import { InterviewData, JobDescription } from '@/types';
+import { supabaseAdmin } from '@/lib/supabase';
+import { JobDescription } from '@/types';
 
 export const dynamic = 'force-dynamic';
 
-const DATA_PATH = path.join(process.cwd(), 'data', 'interview_config.json');
-
-async function getData(): Promise<InterviewData> {
-    const content = await fs.readFile(DATA_PATH, 'utf-8');
-    return JSON.parse(content);
-}
-
-async function saveData(data: InterviewData) {
-    await fs.writeFile(DATA_PATH, JSON.stringify(data, null, 2), 'utf-8');
-}
-
-export async function GET() {
+export async function GET(req: NextRequest) {
     try {
-        const data = await getData();
-        return NextResponse.json(data.uber_roles);
+        const { searchParams } = new URL(req.url);
+        const client = searchParams.get('client');
+
+        let query = supabaseAdmin
+            .from('job_roles')
+            .select('*')
+            .order('created_at', { ascending: false });
+
+        if (client && client !== 'All') {
+            query = query.eq('client', client);
+        }
+
+        const { data, error } = await query;
+
+        if (error) throw error;
+        return NextResponse.json(data);
     } catch (error: any) {
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
@@ -28,15 +30,19 @@ export async function GET() {
 export async function POST(req: NextRequest) {
     try {
         const newJob: JobDescription = await req.json();
-        const data = await getData();
 
         // Simple validation
         if (!newJob.id) newJob.id = Math.random().toString(36).substr(2, 9);
+        const { client = 'Uber', ...jobData } = newJob; // Ensure client fallback
 
-        data.uber_roles.push(newJob);
-        await saveData(data);
+        const { data, error } = await supabaseAdmin
+            .from('job_roles')
+            .insert([{ ...jobData, client }])
+            .select()
+            .single();
 
-        return NextResponse.json(newJob);
+        if (error) throw error;
+        return NextResponse.json(data);
     } catch (error: any) {
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
@@ -45,17 +51,17 @@ export async function POST(req: NextRequest) {
 export async function PUT(req: NextRequest) {
     try {
         const updatedJob: JobDescription = await req.json();
-        const data = await getData();
+        const { id, ...updates } = updatedJob;
 
-        const index = data.uber_roles.findIndex(j => j.id === updatedJob.id);
-        if (index === -1) {
-            return NextResponse.json({ error: 'Job not found' }, { status: 404 });
-        }
+        const { data, error } = await supabaseAdmin
+            .from('job_roles')
+            .update(updates)
+            .eq('id', id)
+            .select()
+            .single();
 
-        data.uber_roles[index] = updatedJob;
-        await saveData(data);
-
-        return NextResponse.json(updatedJob);
+        if (error) throw error;
+        return NextResponse.json(data);
     } catch (error: any) {
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
@@ -64,16 +70,13 @@ export async function PUT(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
     try {
         const { id } = await req.json();
-        const data = await getData();
 
-        const index = data.uber_roles.findIndex(j => j.id === id);
-        if (index === -1) {
-            return NextResponse.json({ error: 'Job not found' }, { status: 404 });
-        }
+        const { error } = await supabaseAdmin
+            .from('job_roles')
+            .delete()
+            .eq('id', id);
 
-        data.uber_roles.splice(index, 1);
-        await saveData(data);
-
+        if (error) throw error;
         return NextResponse.json({ success: true });
     } catch (error: any) {
         return NextResponse.json({ error: error.message }, { status: 500 });

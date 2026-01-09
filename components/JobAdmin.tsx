@@ -66,10 +66,33 @@ export default function JobAdmin({ jobs, onUpdate, onClose }: JobAdminProps) {
         }
     };
 
+    const [userRole, setUserRole] = useState<string>('Systems');
+    const [filterClient, setFilterClient] = useState('All');
+
+    React.useEffect(() => {
+        // Fetch current user details to enforce RBAC
+        import('@/lib/supabase').then(({ supabase }) => {
+            if (supabase) {
+                supabase.auth.getUser().then(({ data: { user } }: { data: { user: any } }) => {
+                    if (user) {
+                        const role = user.user_metadata?.client_role || 'Systems';
+                        setUserRole(role);
+                        if (role !== 'Systems') {
+                            setFilterClient(role);
+                        }
+                    }
+                });
+            }
+        });
+    }, []);
+
+    // Filter jobs first
+    const filteredJobs = jobs.filter(j => filterClient === 'All' || j.client === filterClient);
+
     // Group jobs by category
-    const categories = Array.from(new Set(jobs.map(j => j.category || 'Uncategorized')));
+    const categories = Array.from(new Set(filteredJobs.map(j => j.category || 'Uncategorized')));
     const groupedJobs = categories.reduce((acc, cat) => {
-        acc[cat] = jobs.filter(j => (j.category || 'Uncategorized') === cat);
+        acc[cat] = filteredJobs.filter(j => (j.category || 'Uncategorized') === cat);
         return acc;
     }, {} as Record<string, JobDescription[]>);
 
@@ -77,9 +100,29 @@ export default function JobAdmin({ jobs, onUpdate, onClose }: JobAdminProps) {
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-3xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl animate-in zoom-in duration-300">
                 <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-[#003040] text-white">
-                    <div>
-                        <h2 className="text-2xl font-black tracking-tight">Manage Job Descriptions</h2>
-                        <p className="text-xs font-bold text-[#0095A9] uppercase tracking-widest mt-1">Admin Control Plane</p>
+                    <div className="flex items-center gap-6">
+                        <div>
+                            <h2 className="text-2xl font-black tracking-tight">Manage Job Descriptions</h2>
+                            <p className="text-xs font-bold text-[#0095A9] uppercase tracking-widest mt-1">Admin Control Plane</p>
+                        </div>
+                        <div className="h-8 w-[1px] bg-white/20"></div>
+                        <div className="flex bg-white/10 rounded-lg p-1">
+                            {userRole === 'Systems' ? (
+                                ['All', 'Systems', 'Uber', 'ServiceNow'].map(c => (
+                                    <button
+                                        key={c}
+                                        onClick={() => setFilterClient(c)}
+                                        className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${filterClient === c ? 'bg-[#0095A9] text-white shadow-sm' : 'text-gray-300 hover:text-white'}`}
+                                    >
+                                        {c === 'Systems' ? 'Global' : c}
+                                    </button>
+                                ))
+                            ) : (
+                                <button className="px-3 py-1 text-xs font-bold rounded-md bg-[#0095A9] text-white shadow-sm cursor-default">
+                                    {userRole} Context
+                                </button>
+                            )}
+                        </div>
                     </div>
                     <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors">
                         <X size={24} />
@@ -90,10 +133,18 @@ export default function JobAdmin({ jobs, onUpdate, onClose }: JobAdminProps) {
                     {/* List */}
                     <div className="w-1/3 space-y-6 border-r border-gray-100 pr-8 overflow-y-auto max-h-[70vh]">
                         <button
-                            onClick={() => setEditingJob({ title: '', level: 'SDE-1', category: 'Software Engineering', must_have: [], nice_to_have: [], description: '' })}
+                            onClick={() => setEditingJob({
+                                title: '',
+                                level: 'SDE-1',
+                                category: 'Software Engineering',
+                                client: userRole !== 'Systems' ? userRole : (filterClient === 'All' ? 'Uber' : filterClient),
+                                must_have: [],
+                                nice_to_have: [],
+                                description: ''
+                            })}
                             className="w-full flex items-center justify-center gap-2 py-4 border-2 border-dashed border-gray-200 rounded-2xl text-gray-400 hover:text-[#0095A9] hover:border-[#0095A9] hover:bg-[#0095A9]/5 transition-all font-bold text-sm"
                         >
-                            <Plus size={18} /> Add New Job
+                            <Plus size={18} /> Add New {userRole !== 'Systems' ? userRole : (filterClient === 'All' ? '' : filterClient)} Job
                         </button>
 
                         {Object.entries(groupedJobs).map(([category, categoryJobs]) => (
@@ -105,7 +156,14 @@ export default function JobAdmin({ jobs, onUpdate, onClose }: JobAdminProps) {
                                         className={`p-4 rounded-2xl border-2 cursor-pointer transition-all ${editingJob?.id === job.id ? 'border-[#0095A9] bg-[#0095A9]/5' : 'border-transparent bg-gray-50 hover:bg-gray-100'}`}
                                         onClick={() => setEditingJob(job)}
                                     >
-                                        <div className="text-[10px] font-bold text-[#0095A9] uppercase mb-1">{job.level}</div>
+                                        <div className="flex justify-between items-start mb-1">
+                                            <div className="text-[10px] font-bold text-[#0095A9] uppercase">{job.level}</div>
+                                            {(filterClient === 'All' || userRole === 'Systems') && (
+                                                <div className="text-[9px] font-extrabold uppercase bg-gray-200 text-gray-500 px-2 py-0.5 rounded-full">
+                                                    {job.client === 'Systems' ? 'Global' : job.client}
+                                                </div>
+                                            )}
+                                        </div>
                                         <div className="font-bold text-sm truncate">{job.title}</div>
                                     </div>
                                 ))}
@@ -127,6 +185,19 @@ export default function JobAdmin({ jobs, onUpdate, onClose }: JobAdminProps) {
                                             className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 focus:ring-2 focus:ring-[#0095A9]/20"
                                             placeholder="e.g. Backend Engineer"
                                         />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Client</label>
+                                        <select
+                                            value={editingJob.client || 'Uber'}
+                                            onChange={e => setEditingJob({ ...editingJob, client: e.target.value })}
+                                            disabled={userRole !== 'Systems'}
+                                            className={`w-full border-none rounded-xl px-4 py-3 focus:ring-2 focus:ring-[#0095A9]/20 ${userRole !== 'Systems' ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-gray-50'}`}
+                                        >
+                                            <option value="Systems">Global (Systems)</option>
+                                            <option value="Uber">Uber</option>
+                                            <option value="ServiceNow">ServiceNow</option>
+                                        </select>
                                     </div>
                                     <div className="space-y-2">
                                         <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Level</label>

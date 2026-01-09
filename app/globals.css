@@ -23,7 +23,11 @@ body {
     }
 }
 
-/* Custom Scrollbar for minimalist look */
+/* Ensure fullscreen elements fill with white instead of black bars */
+:fullscreen {
+    background-color: white !important;
+}
+
 ::-webkit-scrollbar {
     width: 6px;
 }

@@ -6,6 +6,7 @@ export interface JobDescription {
     nice_to_have: string[];
     description: string;
     category?: string;
+    client?: string;
 }
 
 export interface Question {
@@ -20,7 +21,7 @@ export interface QuestionCategory {
 }
 
 export interface InterviewData {
-    uber_roles: JobDescription[];
+    roles: JobDescription[];
     question_bank: QuestionCategory[];
 }
 

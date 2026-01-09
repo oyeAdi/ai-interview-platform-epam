@@ -20,10 +20,18 @@ interface Session {
     candidateEmail?: string;
     reportPreview: string;
     hasFinalFeedback?: boolean;
+    client: string;
 }
 
+import { useSearchParams, useRouter } from 'next/navigation';
+
 export default function Dashboard() {
+    const router = useRouter();
+    const searchParams = useSearchParams();
+    const initialClient = searchParams.get('client') || 'All';
+
     const [sessions, setSessions] = useState<Session[]>([]);
+    const [clientName, setClientName] = useState(initialClient); // Default to URL or Global
     const [selectedSession, setSelectedSession] = useState<Session | null>(null);
     const [loading, setLoading] = useState(true);
     const [fullReport, setFullReport] = useState<string>('');
@@ -37,7 +45,32 @@ export default function Dashboard() {
     const [isDeleting, setIsDeleting] = useState(false);
 
     useEffect(() => {
-        fetch('/api/dm/sessions')
+        // Enforce RBAC and Auth
+        import('@/lib/supabase').then(({ supabase }) => {
+            if (!supabase) return;
+            supabase.auth.getUser().then(({ data: { user } }: { data: { user: any } }) => {
+                if (user) {
+                    const role = user.user_metadata?.client_role || 'Systems';
+                    // If not Global Admin, FORCE the client view
+                    if (role !== 'Systems') {
+                        setClientName(role);
+                    } else {
+                        // If Global Admin, allow URL param to dictate, or default to Systems
+                        setClientName(initialClient);
+                    }
+                } else {
+                    // REDIRECT IF NO USER
+                    console.log('No user session found, redirecting to login...');
+                    router.push('/');
+                }
+            });
+        });
+    }, [initialClient, router]); // Run on mount or if URL changes (though we might want to strictly ignore URL if non-admin)
+
+    useEffect(() => {
+        setLoading(true);
+        // Pass clientName to API for server-side filtering
+        fetch(`/api/dm/sessions?client=${clientName}`)
             .then(res => res.json())
             .then(data => {
                 setSessions(data.sessions);
@@ -47,7 +80,7 @@ export default function Dashboard() {
                 setLoading(false);
             })
             .catch(err => console.error("Failed to load sessions", err));
-    }, []);
+    }, [clientName]);
 
     useEffect(() => {
         if (!selectedSession) return;
@@ -159,7 +192,7 @@ export default function Dashboard() {
 
     return (
         <div className="flex flex-col h-screen bg-white font-sans text-slate-900 selection:bg-[#0095A9]/30">
-            <GlobalHeader />
+            <GlobalHeader clientName={clientName} setClientName={setClientName} />
             <div className="flex-1 flex overflow-hidden">
                 {/* Sidebar List */}
                 <div className="w-80 bg-white border-r border-slate-100 flex flex-col">
@@ -176,7 +209,7 @@ export default function Dashboard() {
                         </div>
                     </div>
                     <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-2 scrollbar-thin scrollbar-thumb-slate-100">
-                        {sessions.map(session => (
+                        {sessions.filter(s => clientName === 'All' || s.client === clientName).map(session => (
                             <div
                                 key={session.id}
                                 onClick={() => setSelectedSession(session)}
@@ -417,10 +450,6 @@ export default function Dashboard() {
                                     <div className="mt-8 px-4 flex justify-between items-center">
                                         <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Recorded via EPAM Real-time Interview Engine</p>
                                         <div className="flex items-center gap-6">
-                                            <div className="flex flex-col text-right">
-                                                <span className="text-[9px] text-slate-300 font-black uppercase">Duration</span>
-                                                <span className="text-xs font-bold text-slate-500 tracking-tight">24m 12s</span>
-                                            </div>
                                             <div className="flex flex-col text-right">
                                                 <span className="text-[9px] text-slate-300 font-black uppercase">Quality</span>
                                                 <span className="text-xs font-bold text-slate-500 tracking-tight">1080p WebStream</span>

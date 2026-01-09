@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { JobDescription } from '@/types';
-import { X, Plus, ChevronRight, Loader2, Sparkles, ListChecks, MessageSquare, Code, Layout, ShieldCheck, Play, Copy, ArrowRight, Check } from 'lucide-react';
+import { X, Plus, ChevronRight, Loader2, Sparkles, Copy, Check, Mail, Send } from 'lucide-react';
 import clsx from 'clsx';
+import { RoundDefinition } from '@/data/round_presets';
+import FlowConfigurationPanel from './interview/FlowConfigurationPanel';
 
 interface InterviewConfiguratorProps {
     selectedJob: JobDescription;
@@ -10,7 +12,7 @@ interface InterviewConfiguratorProps {
 }
 
 export default function InterviewConfigurator({ selectedJob, onStart, onBack }: InterviewConfiguratorProps) {
-    const [step, setStep] = useState<'SKILLS' | 'STYLE' | 'DETAILS' | 'LINK'>('SKILLS');
+    const [step, setStep] = useState<'SKILLS' | 'STYLE' | 'ROUNDS' | 'DETAILS' | 'EMAIL_PREVIEW' | 'LINK'>('SKILLS');
     const [skills, setSkills] = useState<string[]>([]);
     const [loading, setLoading] = useState(true);
     const [newSkill, setNewSkill] = useState('');
@@ -19,12 +21,21 @@ export default function InterviewConfigurator({ selectedJob, onStart, onBack }: 
     const [customInstructions, setCustomInstructions] = useState('');
     const [enhancedPrompt, setEnhancedPrompt] = useState<string | null>(null);
     const [isEnhancing, setIsEnhancing] = useState(false);
+
+    // Legacy Durations/Config (Still kept for backward compatibility if needed, or synced)
     const [durations, setDurations] = useState({
         mcq: 2,
         conceptual: 5,
         coding: 7,
         systemDesign: 10
     });
+
+    // Step 2: Round Configuration (V2)
+    const [flow, setFlow] = useState<RoundDefinition[]>([
+        { id: '1', title: 'Screening', type: 'QUIZ', systemPromptContext: 'Validate basic knowledge with rapid fire MCQs.', timeLimit: 120 },
+        { id: '2', title: 'Conceptual', type: 'CHAT', systemPromptContext: 'Deep dive into core concepts. Ask 2-3 follow-ups per topic.', timeLimit: 300 }
+    ]);
+
     const [copied, setCopied] = useState(false);
     const [mcqConfig, setMcqConfig] = useState({
         enabled: true,
@@ -49,16 +60,42 @@ export default function InterviewConfigurator({ selectedJob, onStart, onBack }: 
     // Step 3: Generated Link
     const [inviteLink, setInviteLink] = useState('');
 
+    // Step 4: Email Preview
+    const [emailSubject, setEmailSubject] = useState('');
+    const [emailBody, setEmailBody] = useState('');
+    const [sendingEmail, setSendingEmail] = useState(false);
+    const [emailError, setEmailError] = useState('');
+
+    // Initialize defaults based on Job
     useEffect(() => {
-        // Set defaults based on Category
         const cat = selectedJob.category?.toLowerCase() || '';
         const isSoftware = !cat || cat.includes('software') || cat.includes('engineering') || cat.includes('data') || cat.includes('tech');
 
         setCodingConfig(prev => ({ ...prev, enabled: isSoftware }));
-        setSystemDesignConfig(prev => ({ ...prev, enabled: true })); // Usually keep strategy/design enabled for most senior roles? Or maybe just default true.
+        setSystemDesignConfig(prev => ({ ...prev, enabled: true }));
 
+        // Initialize V2 Flow based on role
+        if (isSoftware) {
+            setFlow([
+                { id: '1', title: 'Screening Round', type: 'QUIZ', systemPromptContext: 'Validate fundamental knowledge. Rapid fire.', timeLimit: 120 },
+                { id: '2', title: 'Technical Deep Dive', type: 'CHAT', systemPromptContext: 'Explore complex scenarios and edge cases.', timeLimit: 300 },
+                { id: '3', title: 'Practical Coding', type: 'CODING', systemPromptContext: 'Solve algorithmic problems. Focus on efficiency.', timeLimit: 420 },
+                { id: '4', title: 'System Design', type: 'SYSTEM_DESIGN', systemPromptContext: 'Design a scalable system architecture.', timeLimit: 600 }
+            ]);
+        } else {
+            setFlow([
+                { id: '1', title: 'Screening Round', type: 'QUIZ', systemPromptContext: 'Validate fundamental concepts.', timeLimit: 120 },
+                { id: '2', title: 'In-Depth Interview', type: 'CHAT', systemPromptContext: 'Detailed behavioral and situational questions.', timeLimit: 600 }
+            ]);
+        }
+    }, [selectedJob]);
+
+    // Fetch Skills when on SKILLS step
+    useEffect(() => {
         const fetchSuggestedSkills = async () => {
-            // ... existing logic ...
+            // Only generate if we haven't already (or force regen?) 
+            // Current logic was: if (step === 'SKILLS' && skills.length === 0)
+
             try {
                 const res = await fetch('/api/interview', {
                     method: 'POST',
@@ -69,11 +106,20 @@ export default function InterviewConfigurator({ selectedJob, onStart, onBack }: 
                     })
                 });
                 const data = await res.json();
-                if (data.skills) {
-                    setSkills(data.skills);
+
+                if (!res.ok || data.error) {
+                    throw new Error(data.error || data.details || 'Failed to generate skills');
                 }
-            } catch (error) {
-                console.error("Failed to generate skills", error);
+
+                if (data.skills && Array.isArray(data.skills)) {
+                    setSkills(data.skills);
+                } else {
+                    // Fallback if AI returns empty
+                    setSkills(selectedJob.must_have || []);
+                }
+            } catch (error: any) {
+                console.error("Failed to generate skills:", error);
+                alert(`AI Generation Error: ${error.message}`); // Temporary feedback
                 setSkills(selectedJob.must_have || []);
             } finally {
                 setLoading(false);
@@ -83,7 +129,7 @@ export default function InterviewConfigurator({ selectedJob, onStart, onBack }: 
         if (step === 'SKILLS' && skills.length === 0) {
             fetchSuggestedSkills();
         }
-    }, [selectedJob, step]);
+    }, [selectedJob, step, skills.length]);
 
     const removeSkill = (skillToRemove: string) => {
         setSkills(skills.filter(s => s !== skillToRemove));
@@ -96,8 +142,16 @@ export default function InterviewConfigurator({ selectedJob, onStart, onBack }: 
         }
     };
 
-    const handleGenerateLink = () => {
+    const handleGenerateLink = async () => {
         if (!candidateName || !candidateEmail) return;
+
+        // Basic Email Validation
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(candidateEmail)) {
+            setEmailError('Please enter a valid email address.');
+            return;
+        }
+        setEmailError('');
 
         const sessionData = {
             jobId: selectedJob.id,
@@ -105,27 +159,78 @@ export default function InterviewConfigurator({ selectedJob, onStart, onBack }: 
             candidateName,
             candidateEmail,
             skills,
+            client: selectedJob.client || 'EPAM Systems',
             config: {
                 customInstructions,
                 durations,
                 mcq: mcqConfig,
                 conceptual: conceptualConfig,
                 coding: codingConfig,
-                systemDesign: systemDesignConfig
+                systemDesign: systemDesignConfig,
+                customFlow: flow
             }
         };
 
-        // Use a Base64URL safe way to encode the session data
-        const jsonStr = JSON.stringify(sessionData);
-        const base64 = btoa(encodeURIComponent(jsonStr).replace(/%([0-9A-F]{2})/g, (match, p1) => {
-            return String.fromCharCode(parseInt(p1, 16));
-        }));
+        try {
+            const res = await fetch('/api/invite/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(sessionData)
+            });
+            const data = await res.json();
 
-        // Make it URL safe (Base64URL)
-        const token = base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-        const link = `${window.location.origin}/assessment/${token}`;
-        setInviteLink(link);
-        setStep('LINK');
+            if (!res.ok) throw new Error(data.error || 'Failed to create invite');
+
+            const link = `${window.location.origin}/assessment/v2?sessionId=${data.sessionId}`;
+            setInviteLink(link);
+
+            // Pre-fill Email Template
+            const clientName = selectedJob.client || 'EPAM Systems';
+            setEmailSubject(`[EPAM Assessment] Interview Invitation for ${selectedJob.title}`);
+            setEmailBody(`Hi ${candidateName},
+
+You are invited to take an AI-led technical assessment for the ${selectedJob.title} position at ${clientName}.
+
+Click the link below to start your interview:
+${link}
+
+Thank you,
+EPAM Recruiting Team`);
+
+            setStep('EMAIL_PREVIEW');
+        } catch (error: any) {
+            console.error(error);
+            alert("Error: " + error.message);
+        }
+    };
+
+    const handleSendInvite = async () => {
+        setSendingEmail(true);
+        try {
+            const res = await fetch('/api/invite/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    to: candidateEmail,
+                    subject: emailSubject,
+                    body: emailBody,
+                    link: inviteLink,
+                    jobId: selectedJob.id,
+                    candidateName
+                })
+            });
+
+            if (!res.ok) throw new Error('Failed to send invite');
+
+            // Proceed to final step regardless of backend simulation success
+            setStep('LINK');
+        } catch (error) {
+            console.error(error);
+            alert("Failed to send email. You can still copy the link manually.");
+            setStep('LINK');
+        } finally {
+            setSendingEmail(false);
+        }
     };
 
     // --- RENDER STEPS ---
@@ -175,12 +280,12 @@ export default function InterviewConfigurator({ selectedJob, onStart, onBack }: 
         return (
             <div className="fixed inset-0 z-50 bg-white flex flex-col items-center justify-center p-6 animate-in fade-in duration-300">
                 <div className="max-w-xl w-full">
-                    <button onClick={() => setStep('STYLE')} className="mb-8 flex items-center text-slate-400 hover:text-slate-600 font-medium text-sm transition-colors">
-                        <ChevronRight className="w-4 h-4 rotate-180 mr-1" /> Back to Calibration
+                    <button onClick={() => setStep('ROUNDS')} className="mb-8 flex items-center text-slate-400 hover:text-slate-600 font-medium text-sm transition-colors">
+                        <ChevronRight className="w-4 h-4 rotate-180 mr-1" /> Back to Rounds
                     </button>
 
                     <div className="text-center mb-10">
-                        <p className="text-[#0095A9] font-bold tracking-widest uppercase text-xs mb-3">Step 3 of 3</p>
+                        <p className="text-[#0095A9] font-bold tracking-widest uppercase text-xs mb-3">Step 4 of 4</p>
                         <h1 className="text-4xl font-black text-[#003040] mb-4">Candidate Details</h1>
                         <p className="text-gray-500">
                             Who is taking this assessment?
@@ -208,6 +313,9 @@ export default function InterviewConfigurator({ selectedJob, onStart, onBack }: 
                                 className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:outline-none focus:border-[#0095A9] text-slate-800"
                             />
                         </div>
+                        {emailError && (
+                            <p className="text-red-500 text-xs font-bold animate-in slide-in-from-top-1 mt-2">{emailError}</p>
+                        )}
                     </div>
 
                     <div className="mt-8">
@@ -216,7 +324,105 @@ export default function InterviewConfigurator({ selectedJob, onStart, onBack }: 
                             disabled={!candidateName || !candidateEmail}
                             className="w-full py-4 bg-[#0095A9] hover:bg-[#008496] text-white rounded-2xl font-bold text-lg shadow-lg shadow-[#0095A9]/20 transition-all hover:-translate-y-1 disabled:opacity-50 disabled:hover:translate-y-0 disabled:shadow-none"
                         >
-                            Generate Invite Link
+                            Generate Invite & Preview
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    if (step === 'EMAIL_PREVIEW') {
+        return (
+            <div className="fixed inset-0 z-50 bg-white flex flex-col items-center justify-center p-6 animate-in fade-in duration-300">
+                <div className="max-w-3xl w-full h-[90vh] flex flex-col">
+                    <button onClick={() => setStep('DETAILS')} className="mb-4 flex items-center text-slate-400 hover:text-slate-600 font-medium text-sm transition-colors">
+                        <ChevronRight className="w-4 h-4 rotate-180 mr-1" /> Back to Details
+                    </button>
+
+                    <div className="text-center mb-6">
+                        <p className="text-[#0095A9] font-bold tracking-widest uppercase text-xs mb-2">Step 5 of 5</p>
+                        <h1 className="text-3xl font-black text-[#003040] mb-2">Preview & Send Invite</h1>
+                        <p className="text-gray-500 text-sm">
+                            Review the email invitation before sending it to the candidate.
+                        </p>
+                    </div>
+
+                    <div className="flex-1 bg-slate-50 border border-slate-200 rounded-3xl p-8 overflow-y-auto space-y-6 shadow-sm">
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">To</label>
+                            <input
+                                disabled
+                                value={candidateEmail}
+                                className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-slate-500 cursor-not-allowed"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Subject</label>
+                            <input
+                                type="text"
+                                value={emailSubject}
+                                onChange={(e) => setEmailSubject(e.target.value)}
+                                className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:outline-none focus:border-[#0095A9] text-slate-800 font-bold"
+                            />
+                        </div>
+                        <div className="flex-1 flex flex-col">
+                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Message Body</label>
+                            <textarea
+                                value={emailBody}
+                                onChange={(e) => setEmailBody(e.target.value)}
+                                className="w-full flex-1 min-h-[300px] p-6 bg-white border border-slate-200 rounded-xl focus:outline-none focus:border-[#0095A9] text-slate-700 leading-relaxed resize-none font-mono text-sm whitespace-pre-wrap"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="mt-6 flex justify-end gap-4">
+                        <button
+                            onClick={() => setStep('LINK')} // Skip sending
+                            className="px-6 py-4 text-slate-500 font-bold hover:text-slate-700 transition-colors"
+                        >
+                            Skip & Show Link
+                        </button>
+                        <button
+                            onClick={handleSendInvite}
+                            disabled={sendingEmail || !emailSubject || !emailBody}
+                            className="px-8 py-4 bg-[#0095A9] text-white font-bold rounded-2xl hover:bg-[#008496] transition-all shadow-lg shadow-[#0095A9]/20 flex items-center gap-2 disabled:opacity-50"
+                        >
+                            {sendingEmail ? <Loader2 className="animate-spin" /> : <Send size={20} />}
+                            Send Invitation
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    if (step === 'ROUNDS') {
+        return (
+            <div className="fixed inset-0 z-50 bg-white flex flex-col items-center justify-center p-6 animate-in fade-in duration-300">
+                <div className="max-w-5xl w-full h-[96vh] flex flex-col">
+                    <button onClick={() => setStep('STYLE')} className="mb-2 flex items-center text-slate-400 hover:text-slate-600 font-medium text-sm transition-colors">
+                        <ChevronRight className="w-4 h-4 rotate-180 mr-1" /> Back to Calibration
+                    </button>
+
+                    <div className="text-center mb-2">
+                        <p className="text-[#0095A9] font-bold tracking-widest uppercase text-xs mb-1">Step 3 of 4</p>
+                        <h1 className="text-3xl font-black text-[#003040] mb-1">Round Configuration</h1>
+                        <p className="text-gray-500 text-sm">
+                            Define the interview rounds and AI personas for each stage.
+                        </p>
+                    </div>
+
+                    <div className="flex-1 overflow-hidden pb-4">
+                        <FlowConfigurationPanel flow={flow} onChange={setFlow} />
+                    </div>
+
+                    <div className="mt-auto pt-6 border-t border-slate-100 flex justify-end">
+                        <button
+                            onClick={() => setStep('DETAILS')}
+                            className="px-8 py-4 bg-[#0095A9] text-white font-bold rounded-2xl hover:bg-[#008496] transition-all shadow-lg shadow-[#0095A9]/20"
+                        >
+                            Next: Candidate Details
                         </button>
                     </div>
                 </div>
@@ -227,23 +433,23 @@ export default function InterviewConfigurator({ selectedJob, onStart, onBack }: 
     if (step === 'STYLE') {
         return (
             <div className="fixed inset-0 z-50 bg-white flex flex-col items-center justify-center p-6 animate-in fade-in duration-300">
-                <div className="max-w-3xl w-full h-[90vh] flex flex-col">
+                <div className="max-w-5xl w-full h-[96vh] flex flex-col">
                     <button onClick={() => setStep('SKILLS')} className="mb-4 flex items-center text-slate-400 hover:text-slate-600 font-medium text-sm transition-colors">
                         <ChevronRight className="w-4 h-4 rotate-180 mr-1" /> Back to Skills
                     </button>
 
                     <div className="text-center mb-6">
-                        <p className="text-[#0095A9] font-bold tracking-widest uppercase text-xs mb-2">Step 2 of 3</p>
+                        <p className="text-[#0095A9] font-bold tracking-widest uppercase text-xs mb-2">Step 2 of 4</p>
                         <h1 className="text-3xl font-black text-[#003040] mb-2">Style & Calibration</h1>
                         <p className="text-gray-500 text-sm">
-                            Configure the interview persona, round durations, and strictness.
+                            Configure the interview persona and strictness.
                         </p>
                     </div>
 
                     <div className="flex-1 overflow-y-auto pr-2 space-y-6">
                         {/* Global Instructions */}
-                        <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200">
-                            <div className="flex justify-between items-center mb-2">
+                        <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 h-full flex flex-col">
+                            <div className="flex justify-between items-center mb-4">
                                 <h3 className="font-bold text-slate-800 flex items-center gap-2">
                                     <Sparkles className="w-4 h-4 text-[#0095A9]" />
                                     Global Instructions
@@ -271,7 +477,7 @@ export default function InterviewConfigurator({ selectedJob, onStart, onBack }: 
                                             } else if (data.error) {
                                                 alert(`Enhancement failed: ${data.error}`);
                                             }
-                                        } catch (e: any) {
+                                        } catch (e: unknown) {
                                             console.error(e);
                                             alert("Failed to connect to enhancement engine.");
                                         } finally {
@@ -284,7 +490,8 @@ export default function InterviewConfigurator({ selectedJob, onStart, onBack }: 
                                     <Sparkles className="w-3 h-3" /> {isEnhancing ? 'Enhancing...' : 'Enhance with AI'}
                                 </button>
                             </div>
-                            <p className="text-xs text-slate-500 mb-3">Provide specific guidelines (e.g., "Be strict", "Ask about caching") and click Enhance to structure them.</p>
+                            <p className="text-xs text-slate-500 mb-3">Provide specific guidelines (e.g., &quot;Be strict&quot;, &quot;Ask about caching&quot;) and click Enhance to structure them.</p>
+
 
                             {/* Enhanced Prompt Preview - MOVED ABOVE TEXTAREA FOR VISIBILITY */}
                             {enhancedPrompt && (
@@ -336,174 +543,17 @@ export default function InterviewConfigurator({ selectedJob, onStart, onBack }: 
                                     // Default / Software
                                     return `Describe your intent roughly for ${selectedJob.title}...&#10;e.g. 'Ask hard questions about ${selectedJob.must_have?.[0] || 'core skills'}, focus on real-world scenarios, and be strict about details.'`;
                                 })()}
-                                className="w-full h-32 px-4 py-3 bg-white border border-slate-200 rounded-xl focus:outline-none focus:border-[#0095A9] text-sm text-slate-800 resize-none font-mono"
+                                className="w-full h-[500px] px-4 py-3 bg-white border border-slate-200 rounded-xl focus:outline-none focus:border-[#0095A9] text-sm text-slate-800 resize-none font-mono leading-relaxed"
                             />
-                        </div>
-
-                        {/* Round Strategy Cards */}
-                        <div className="space-y-4">
-                            <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                                <ListChecks className="w-4 h-4 text-[#0095A9]" />
-                                Round Configuration & Strategy
-                            </h3>
-
-                            <div className="grid md:grid-cols-2 gap-4">
-                                {/* MCQ Round Card */}
-                                {/* MCQ Round Card */}
-                                <div className="p-6 rounded-2xl border bg-white border-slate-200 shadow-sm">
-                                    <div className="flex items-center justify-between mb-4">
-                                        <div className="flex items-center gap-2">
-                                            <div className="p-2 bg-blue-50 rounded-lg text-blue-600"><ListChecks size={16} /></div>
-                                            <div>
-                                                <h4 className="font-bold text-slate-700 text-sm">Round 1: Screening</h4>
-                                                <p className="text-[10px] text-slate-400 font-medium">Format: Rapid Fire MCQ</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="space-y-3 animate-in fade-in">
-                                        <div className="flex gap-3">
-                                            <div className="flex-1">
-                                                <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">Time (Min)</label>
-                                                <input type="number" value={durations.mcq} onChange={(e) => setDurations({ ...durations, mcq: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 focus:outline-[#0095A9]" />
-                                            </div>
-                                            <div className="flex-1">
-                                                <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">Questions</label>
-                                                <input type="number" value={mcqConfig.maxQuestions} onChange={(e) => setMcqConfig({ ...mcqConfig, maxQuestions: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 focus:outline-[#0095A9]" />
-                                            </div>
-                                        </div>
-                                        <p className="text-[10px] text-slate-400 italic bg-slate-50 p-2 rounded-lg">
-                                            "Validate basic knowledge. No follow-ups."
-                                        </p>
-                                    </div>
-                                </div>
-
-                                {/* Conceptual Round Card */}
-                                <div className="p-6 rounded-2xl border bg-white border-slate-200 shadow-sm">
-                                    <div className="flex items-center gap-2 mb-4">
-                                        <div className="p-2 bg-purple-50 rounded-lg text-purple-600"><MessageSquare size={16} /></div>
-                                        <div>
-                                            <h4 className="font-bold text-slate-700 text-sm">Round 2: Conceptual</h4>
-                                            <p className="text-[10px] text-slate-400 font-medium">Format: Deep Dive Q&A</p>
-                                        </div>
-                                    </div>
-                                    <div className="space-y-3">
-                                        <div className="flex gap-3">
-                                            <div className="flex-1">
-                                                <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">Time (Min)</label>
-                                                <input type="number" value={durations.conceptual} onChange={(e) => setDurations({ ...durations, conceptual: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 focus:outline-[#0095A9]" />
-                                            </div>
-                                            <div className="flex-1">
-                                                <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">Questions</label>
-                                                <input type="number" value={conceptualConfig.maxQuestions} onChange={(e) => setConceptualConfig({ ...conceptualConfig, maxQuestions: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 focus:outline-[#0095A9]" />
-                                            </div>
-                                        </div>
-                                        <p className="text-[10px] text-slate-400 italic bg-slate-50 p-2 rounded-lg">
-                                            "Max 2-3 follow-ups per topic. Auto-switch topics."
-                                        </p>
-                                    </div>
-                                </div>
-
-                                {(() => {
-                                    const cat = selectedJob.category?.toLowerCase() || '';
-                                    const isSoftware = !cat || cat.includes('software') || cat.includes('engineering') || cat.includes('data') || cat.includes('tech');
-
-                                    return (
-                                        <>
-                                            {/* Coding Round Card - ONLY for Software Roles */}
-                                            {isSoftware && (
-                                                <div className="p-6 rounded-2xl border bg-white border-slate-200 shadow-sm md:col-span-2">
-                                                    <div className="flex items-center gap-2 mb-4">
-                                                        <div className={`p-2 rounded-lgTransition-colors ${codingConfig.enabled ? 'bg-orange-50 text-orange-600' : 'bg-gray-100 text-gray-400'}`}><Code size={16} /></div>
-                                                        <div>
-                                                            <div className="flex items-center gap-2">
-                                                                <input
-                                                                    type="checkbox"
-                                                                    checked={codingConfig.enabled}
-                                                                    onChange={e => setCodingConfig({ ...codingConfig, enabled: e.target.checked })}
-                                                                    className="w-4 h-4 rounded border-gray-300 text-[#0095A9] focus:ring-[#0095A9]"
-                                                                />
-                                                                <h4 className={`font-bold text-sm ${codingConfig.enabled ? 'text-slate-700' : 'text-slate-400'}`}>Round 3: Practical / Coding</h4>
-                                                            </div>
-                                                            <p className="text-[10px] text-slate-400 font-medium">Format: LeetCode / SQL / Scripts</p>
-                                                        </div>
-                                                    </div>
-                                                    <div className={`grid md:grid-cols-2 gap-4 transition-opacity ${codingConfig.enabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
-                                                        <div className="space-y-3">
-                                                            <div className="flex gap-3">
-                                                                <div className="flex-1">
-                                                                    <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">Time (Min)</label>
-                                                                    <input type="number" value={durations.coding} onChange={(e) => setDurations({ ...durations, coding: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 focus:outline-[#0095A9]" />
-                                                                </div>
-                                                                <div className="flex-1">
-                                                                    <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">Questions</label>
-                                                                    <input type="number" value={codingConfig.maxQuestions} onChange={(e) => setCodingConfig({ ...codingConfig, maxQuestions: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 focus:outline-[#0095A9]" />
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                        <div>
-                                                            <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">Question Mix / Topics</label>
-                                                            <input
-                                                                type="text"
-                                                                value={codingConfig.focusAreas}
-                                                                onChange={(e) => setCodingConfig({ ...codingConfig, focusAreas: e.target.value })}
-                                                                placeholder="e.g. 1. Algorithms, 2. SQL, 3. Scripts"
-                                                                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 focus:outline-[#0095A9] placeholder:font-normal"
-                                                            />
-                                                            <p className="text-[10px] text-slate-400 mt-1 italic">
-                                                                "Strict Compiler Persona. Multi-question flow."
-                                                            </p>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            )}
-
-                                            {/* Design / Strategy Card */}
-                                            <div className="p-6 rounded-2xl border bg-white border-slate-200 shadow-sm md:col-span-2">
-                                                <div className="flex items-center gap-2 mb-4">
-                                                    <div className={`p-2 rounded-lg transition-colors ${systemDesignConfig.enabled ? 'bg-green-50 text-green-600' : 'bg-gray-100 text-gray-400'}`}><Layout size={16} /></div>
-                                                    <div>
-                                                        <div className="flex items-center gap-2">
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={systemDesignConfig.enabled}
-                                                                onChange={e => setSystemDesignConfig({ ...systemDesignConfig, enabled: e.target.checked })}
-                                                                className="w-4 h-4 rounded border-gray-300 text-[#0095A9] focus:ring-[#0095A9]"
-                                                            />
-                                                            <h4 className={`font-bold text-sm ${systemDesignConfig.enabled ? 'text-slate-700' : 'text-slate-400'}`}>
-                                                                Round {isSoftware ? '4' : '3'}: {isSoftware ? 'Strategy / System Design' : 'Strategic Case Study'}
-                                                            </h4>
-                                                        </div>
-                                                        <p className="text-[10px] text-slate-400 font-medium">
-                                                            Format: {isSoftware ? 'Architecture Whiteboarding' : 'Scenario Analysis & Strategy'}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                                <div className={`space-y-3 transition-opacity ${systemDesignConfig.enabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
-                                                    <div className="w-1/3">
-                                                        <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">Time (Min)</label>
-                                                        <input type="number" value={durations.systemDesign} onChange={(e) => setDurations({ ...durations, systemDesign: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 focus:outline-[#0095A9]" />
-                                                    </div>
-                                                    <p className="text-[10px] text-slate-400 italic bg-slate-50 p-2 rounded-lg">
-                                                        {isSoftware
-                                                            ? "\"Structured Rubric: Requirements \u2192 Estimates \u2192 HLD \u2192 Deep Dive.\""
-                                                            : "\"Structured Rubric: Situation \u2192 Strategy \u2192 Plan \u2192 Metrics.\""
-                                                        }
-                                                    </p>
-                                                </div>
-                                            </div>
-                                        </>
-                                    );
-                                })()}
-                            </div>
                         </div>
                     </div>
 
                     <div className="mt-6 pt-6 border-t border-slate-100 flex justify-end">
                         <button
-                            onClick={() => setStep('DETAILS')}
+                            onClick={() => setStep('ROUNDS')}
                             className="px-8 py-4 bg-[#0095A9] text-white font-bold rounded-2xl hover:bg-[#008496] transition-all shadow-lg shadow-[#0095A9]/20"
                         >
-                            Next: Candidate Details
+                            Next: Round Configuration
                         </button>
                     </div>
                 </div>
@@ -516,7 +566,7 @@ export default function InterviewConfigurator({ selectedJob, onStart, onBack }: 
         <div className="fixed inset-0 z-50 bg-white flex flex-col items-center justify-center p-6 animate-in fade-in duration-300">
             <div className="max-w-2xl w-full">
                 <div className="text-center mb-10">
-                    <p className="text-[#0095A9] font-bold tracking-widest uppercase text-xs mb-3">Step 1 of 3</p>
+                    <p className="text-[#0095A9] font-bold tracking-widest uppercase text-xs mb-3">Step 1 of 4</p>
                     <h1 className="text-4xl font-black text-[#003040] mb-4">Calibrate Interview</h1>
                     <p className="text-gray-500">
                         AI has analyzed <span className="font-bold text-gray-800">{selectedJob.title}</span>. Adjust focus areas below.

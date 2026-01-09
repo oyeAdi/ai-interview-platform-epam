@@ -1,27 +1,89 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
-import { ShieldAlert, Maximize2, AlertTriangle, MonitorX } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { ShieldAlert, Maximize2, AlertTriangle, MonitorX, ShieldCheck } from 'lucide-react';
 
 interface AssessmentShieldProps {
     children: React.ReactNode;
     onViolation?: (type: string, details: string) => void;
     onTerminate?: () => void;
+    onRestartSharing?: () => void;
     sessionId: string;
 }
 
-export default function AssessmentShield({ children, onViolation, onTerminate, sessionId }: AssessmentShieldProps) {
+export default function AssessmentShield({ children, onViolation, onTerminate, onRestartSharing, sessionId }: AssessmentShieldProps) {
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [isFocused, setIsFocused] = useState(true);
     const [isMultiTab, setIsMultiTab] = useState(false);
     const [violationCount, setViolationCount] = useState(0);
     const [fullscreenStrikes, setFullscreenStrikes] = useState(0);
+    const [focusStrikes, setFocusStrikes] = useState(0);
+    const [shareStrikes, setShareStrikes] = useState(0);
+    const [isSharing, setIsSharing] = useState(true);
     const containerRef = useRef<HTMLDivElement>(null);
+    const isReadyRef = useRef(false);
+    const lastViolationRef = useRef<number>(0);
+
+    // --- Violation Handler (Stable & Available) ---
+    const handleViolation = useCallback((type: string, details: string) => {
+        const now = Date.now();
+        if (now - lastViolationRef.current < 1200) {
+            console.log(`[Shield] Cooldown active. Ignoring violation: ${type}`);
+            return;
+        }
+        lastViolationRef.current = now;
+
+        console.log(`[Shield] Violation Accepted: ${type} - ${details}`);
+
+        if (type === 'SHARE_LOSS') {
+            setIsSharing(false);
+            setShareStrikes(prev => prev + 1);
+        }
+
+        if (type === 'FOCUS_LOSS' || type === 'VISIBILITY_LOSS') {
+            setIsFocused(false);
+            setFocusStrikes(prev => prev + 1);
+        }
+
+        if (type === 'FULLSCREEN_EXIT') {
+            setIsFullscreen(false);
+            setFullscreenStrikes(prev => prev + 1);
+        }
+
+        setViolationCount(prev => prev + 1);
+        if (onViolation) onViolation(type, details);
+    }, [onViolation]);
+
+    // Handle Termination via Effect to avoid "setState during render" issues
+    useEffect(() => {
+        if (shareStrikes >= 2 || focusStrikes >= 2 || fullscreenStrikes >= 2) {
+            console.warn("[Shield] Strike threshold reached. Terminating session...");
+            if (onTerminate) onTerminate();
+        }
+    }, [shareStrikes, focusStrikes, fullscreenStrikes, onTerminate]);
+
+    // Expose globally for child components (InterviewSessionV2)
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            (window as any).reportShieldViolation = handleViolation;
+        }
+        return () => {
+            if (typeof window !== 'undefined') {
+                delete (window as any).reportShieldViolation;
+            }
+        };
+    }, [handleViolation]);
 
     useEffect(() => {
-        // 1. Multi-Tab Detection via BroadcastChannel
-        const channel = new BroadcastChannel(`assessment_${sessionId}`);
+        // Sync initial state
+        setIsFullscreen(!!document.fullscreenElement);
 
+        const readyTimer = setTimeout(() => {
+            isReadyRef.current = true;
+        }, 1500);
+
+        // 1. Multi-Tab Detection
+        const channel = new BroadcastChannel(`assessment_${sessionId}`);
         channel.onmessage = (event) => {
             if (event.data === 'ping') {
                 channel.postMessage('pong');
@@ -30,23 +92,20 @@ export default function AssessmentShield({ children, onViolation, onTerminate, s
                 setIsMultiTab(true);
             }
         };
-
-        // Broadcast presence
         channel.postMessage('ping');
 
-        // 2. Focus & Visibility Listeners
+        // 2. Focus & Visibility
         const handleVisibilityChange = () => {
             if (document.hidden) {
-                handleViolation('VISIBILITY_LOSS', 'Tab switched or browser minimized');
-                setIsFocused(false);
+                handleViolation('VISIBILITY_LOSS', 'Candidate switched tabs or minimized browser');
             } else {
-                setIsFocused(true);
+                setIsFocused(true); // Allow clearing warning when returning
             }
         };
 
         const handleBlur = () => {
+            if (!isReadyRef.current) return;
             handleViolation('FOCUS_LOSS', 'Browser window lost focus');
-            setIsFocused(false);
         };
 
         const handleFocus = () => {
@@ -56,23 +115,16 @@ export default function AssessmentShield({ children, onViolation, onTerminate, s
         // 3. Fullscreen Listeners
         const handleFullscreenChange = () => {
             const currentFullscreen = !!document.fullscreenElement;
-            setIsFullscreen(currentFullscreen);
-
-            if (!currentFullscreen && isFullscreen) {
-                const nextStrikes = fullscreenStrikes + 1;
-                setFullscreenStrikes(nextStrikes);
-                handleViolation('FULLSCREEN_EXIT', `Strike ${nextStrikes} of 2`);
-
-                if (nextStrikes >= 2) {
-                    if (onTerminate) onTerminate();
-                }
+            if (!isReadyRef.current) {
+                setIsFullscreen(currentFullscreen);
+                return;
             }
-        };
 
-        const handleViolation = (type: string, details: string) => {
-            setViolationCount(prev => prev + 1);
-            if (onViolation) onViolation(type, details);
-            console.warn(`[Shield] Violation Detected: ${type} - ${details}`);
+            if (!currentFullscreen) {
+                handleViolation('FULLSCREEN_EXIT', 'Exited fullscreen mode');
+            } else {
+                setIsFullscreen(true);
+            }
         };
 
         document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -80,102 +132,137 @@ export default function AssessmentShield({ children, onViolation, onTerminate, s
         window.addEventListener('focus', handleFocus);
         document.addEventListener('fullscreenchange', handleFullscreenChange);
 
+        const watchdog = setInterval(() => {
+            setIsFullscreen(!!document.fullscreenElement);
+        }, 3000);
+
         return () => {
+            clearTimeout(readyTimer);
+            clearInterval(watchdog);
             document.removeEventListener('visibilitychange', handleVisibilityChange);
             window.removeEventListener('blur', handleBlur);
             window.removeEventListener('focus', handleFocus);
             document.removeEventListener('fullscreenchange', handleFullscreenChange);
             channel.close();
         };
-    }, [sessionId, isFullscreen, fullscreenStrikes]);
+    }, [sessionId, handleViolation, onTerminate]);
 
     const enterFullscreen = () => {
-        const element = document.documentElement;
-        if (element.requestFullscreen) {
-            element.requestFullscreen().catch(err => {
-                console.error("Failed to enter fullscreen", err);
-            });
+        if (containerRef.current?.requestFullscreen) {
+            containerRef.current.requestFullscreen().catch(e => console.error("Fullscreen failed", e));
         }
     };
 
-    // --- Violation Overlays ---
-
     return (
-        <div ref={containerRef} className="relative w-full h-screen bg-white">
-            {/* Multi-Tab Block - Absolute Top Priority */}
+        <div ref={containerRef} className="fixed inset-0 w-full h-full bg-white overflow-hidden selection:bg-[#0095A9]/10">
+            {/* Multi-Tab Conflict */}
             {isMultiTab && (
-                <div className="fixed inset-0 z-[10000] bg-[#003040] flex items-center justify-center p-6 text-center text-white">
-                    <div className="max-w-md animate-in fade-in zoom-in duration-300">
-                        <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-8">
-                            <MonitorX className="w-10 h-10 text-red-500" />
-                        </div>
-                        <h2 className="text-3xl font-black mb-4">Security Conflict</h2>
+                <div className="fixed inset-0 z-[10000] bg-slate-900/95 backdrop-blur-xl flex items-center justify-center p-6 text-center text-white">
+                    <div className="max-w-md">
+                        <MonitorX className="w-16 h-16 text-red-500 mx-auto mb-6" />
+                        <h2 className="text-3xl font-black mb-4 uppercase tracking-tight">Security Conflict</h2>
                         <p className="text-slate-300 mb-8 leading-relaxed">
-                            This interview session is already open in another tab. To prevent cheating, only one active session is allowed.
+                            This interview is already open in another tab. Please close all other tabs and refresh this page to continue.
                         </p>
-                        <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-sm font-semibold text-red-400">
-                            Please close all other tabs of this assessment and refresh this page.
-                        </div>
                     </div>
                 </div>
             )}
 
-            {/* Fullscreen Requirement Overlay */}
-            {!isFullscreen && !isMultiTab && (
+            {/* Screen Sharing Stopped Overlay */}
+            {!isSharing && !isMultiTab && (
+                <div className="fixed inset-0 z-[9999] bg-slate-900/95 backdrop-blur-xl flex items-center justify-center p-6 text-center text-white">
+                    <div className="max-w-md">
+                        <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-8 animate-pulse">
+                            <ShieldAlert className="w-10 h-10 text-red-500" />
+                        </div>
+                        <h2 className="text-3xl font-black mb-4 uppercase tracking-tight">Sharing Required</h2>
+                        <p className="text-slate-300 mb-8 leading-relaxed">
+                            Full monitor sharing is mandatory for this assessment.
+                            If you stopped sharing by mistake, please restart it now.
+                        </p>
+
+                        <div className="p-6 bg-red-500/10 border border-red-500/20 rounded-3xl mb-8">
+                            <p className="text-red-400 font-black uppercase tracking-widest text-[10px] mb-1">Strike {shareStrikes} of 2</p>
+                            <p className="text-sm text-red-200">
+                                {shareStrikes >= 2 ? 'Security threshold exceeded. Terminating session.' : 'One more interruption will result in automatic termination.'}
+                            </p>
+                        </div>
+
+                        {shareStrikes < 2 && (
+                            <button
+                                onClick={() => {
+                                    setIsSharing(true);
+                                    if (onRestartSharing) onRestartSharing();
+                                }}
+                                className="px-10 py-5 bg-[#0095A9] text-white rounded-2xl font-bold shadow-2xl hover:bg-[#00ADC2] active:scale-95 transition-all flex items-center gap-3 mx-auto"
+                            >
+                                <ShieldCheck className="w-5 h-5" />
+                                Restart Full Monitor Sharing
+                            </button>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* Fullscreen Requirement */}
+            {!isFullscreen && isSharing && !isMultiTab && (
                 <div className="fixed inset-0 z-[9998] bg-slate-900/95 backdrop-blur-xl flex items-center justify-center p-6 text-center text-white">
                     <div className="max-w-md">
-                        <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-8">
-                            <Maximize2 className="w-10 h-10 text-red-500" />
-                        </div>
-                        <h2 className="text-3xl font-black mb-4">
-                            {fullscreenStrikes === 0 ? 'Fullscreen Required' : 'Security Warning'}
-                        </h2>
-                        <div className="mb-8">
-                            <p className="text-slate-300 leading-relaxed mb-4">
-                                To maintain assessment integrity, this interview must be conducted in fullscreen mode.
-                            </p>
-                            {fullscreenStrikes > 0 ? (
-                                <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl">
-                                    <p className="text-red-400 font-bold uppercase tracking-widest text-xs mb-1">Strike 1 of 2</p>
-                                    <p className="text-sm text-red-200">
-                                        One more exit will results in **immediate termination** of your interview.
-                                    </p>
-                                </div>
-                            ) : (
-                                <p className="text-slate-400 text-sm">
-                                    Moving out of fullscreen is flagged as a security violation.
+                        <Maximize2 className="w-16 h-16 text-[#0095A9] mx-auto mb-6" />
+                        <h2 className="text-3xl font-black mb-4 uppercase tracking-tight">Fullscreen Mode</h2>
+                        <p className="text-slate-300 mb-8 leading-relaxed">
+                            To protect assessment integrity, you must stay in fullscreen. Exiting fullscreen is logged as a security violation.
+                        </p>
+
+                        {fullscreenStrikes > 0 && (
+                            <div className="p-6 bg-red-500/10 border border-red-500/20 rounded-3xl mb-8">
+                                <p className="text-red-400 font-black uppercase tracking-widest text-[10px] mb-1">Strike {fullscreenStrikes} of 2</p>
+                                <p className="text-sm text-red-200">
+                                    {fullscreenStrikes >= 2 ? 'Threshold exceeded.' : 'Further violations will terminate the session.'}
                                 </p>
-                            )}
-                        </div>
-                        <button
-                            onClick={enterFullscreen}
-                            className="px-8 py-4 bg-[#0095A9] text-white rounded-full font-bold shadow-2xl hover:bg-[#00ADC2] transition-all"
-                        >
-                            {fullscreenStrikes === 0 ? 'Enter Fullscreen Mode' : 'Return to Interview'}
-                        </button>
+                            </div>
+                        )}
+
+                        {fullscreenStrikes < 2 && (
+                            <button
+                                onClick={enterFullscreen}
+                                className="px-10 py-5 bg-[#0095A9] text-white rounded-2xl font-bold shadow-2xl hover:bg-[#00ADC2] transition-all"
+                            >
+                                Return to Fullscreen
+                            </button>
+                        )}
                     </div>
                 </div>
             )}
 
             {/* Focus Lost Overlay */}
-            {!isFocused && isFullscreen && !isMultiTab && (
-                <div className="absolute inset-0 z-[9997] bg-black/40 backdrop-blur-sm flex items-center justify-center text-center">
-                    <div className="bg-white p-8 rounded-3xl shadow-2xl max-w-sm animate-in slide-in-from-bottom duration-300">
-                        <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
-                            <AlertTriangle className="w-8 h-8 text-red-600" />
+            {!isFocused && isFullscreen && isSharing && !isMultiTab && (
+                <div className="fixed inset-0 z-[9997] bg-slate-900/90 backdrop-blur-md flex items-center justify-center text-center text-white p-6">
+                    <div className="bg-white p-12 rounded-[40px] shadow-2xl max-w-md">
+                        <AlertTriangle className="w-16 h-16 text-amber-500 mx-auto mb-6" />
+                        <h3 className="text-3xl font-black text-slate-800 mb-4 tracking-tight uppercase">Focus Lost</h3>
+                        <p className="text-slate-500 mb-8 font-medium">
+                            You moved away from the assessment window. This serves as a warning.
+                        </p>
+
+                        <div className="p-6 bg-red-50 border-2 border-red-100 rounded-3xl mb-8">
+                            <p className="text-red-600 font-black uppercase tracking-widest text-[10px] mb-2">Strike {focusStrikes} of 2</p>
+                            <p className="text-slate-600 text-sm font-semibold">
+                                {focusStrikes >= 2 ? 'Terminating...' : 'Return to the dashboard to avoid termination.'}
+                            </p>
                         </div>
-                        <h3 className="text-xl font-bold text-slate-800 mb-2">Focus Lost</h3>
-                        <p className="text-slate-500 text-sm mb-6">
-                            You have moved away from the interview tab. This activity has been logged and reported to the system.
-                        </p>
-                        <p className="text-[10px] font-bold text-red-600 uppercase tracking-widest">
-                            Violation Count: {violationCount}
-                        </p>
+
+                        <button
+                            onClick={() => setIsFocused(true)}
+                            className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black hover:bg-slate-800 transition-all uppercase tracking-widest text-sm"
+                        >
+                            Return to Interview
+                        </button>
                     </div>
                 </div>
             )}
 
-            <div className="w-full h-full overflow-hidden">
+            <div className="w-full h-full">
                 {children}
             </div>
         </div>
