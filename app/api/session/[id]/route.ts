@@ -3,14 +3,14 @@ import { supabaseAdmin } from '@/lib/supabase';
 
 export async function GET(
     req: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     if (!supabaseAdmin) {
         return NextResponse.json({ error: 'Supabase not configured' }, { status: 500 });
     }
 
     try {
-        const id = params.id;
+        const { id } = await params;
         const { data, error } = await supabaseAdmin
             .from('assessment_sessions')
             .select('*')
