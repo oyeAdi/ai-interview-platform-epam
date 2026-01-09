@@ -6,7 +6,8 @@ import {
     Send, Mic, MicOff, Video, VideoOff, MessageCircle, Info,
     CheckCircle2, AlertCircle, Clock, Zap, ListChecks,
     MessageSquare, Code, Layout, ChevronRight, LogOut,
-    CheckCircle, ShieldCheck, Settings, Monitor
+    CheckCircle, ShieldCheck, Settings, Monitor, Play, ShieldAlert, Lock, XCircle,
+    MonitorX, Maximize2, Shield
 } from 'lucide-react';
 import clsx from 'clsx';
 import Markdown from 'react-markdown';
@@ -26,17 +27,18 @@ interface InterviewSessionV2Props {
     candidateName?: string;
     onResume?: (resumeText: string) => void;
     isTerminated?: boolean;
+    initialScreenStream?: MediaStream | null;
     onPermissionDenied?: () => void;
     onFinish?: (messages: any[], summaries: string[], recordingBlob: Blob | null, fullReport: string) => void;
     onCheckpoint?: (transcript: any[], fullReport: string) => void;
+    showConfig?: boolean;
 }
 
 export interface InterviewSessionV2Ref {
-    restartSharing: () => void;
 }
 
 const InterviewSessionV2 = forwardRef<InterviewSessionV2Ref, InterviewSessionV2Props>(
-    ({ jobId: initialJobId, candidateName: initialCandidateName, isTerminated, onPermissionDenied, onFinish, onCheckpoint }, ref) => {
+    ({ jobId: initialJobId, candidateName: initialCandidateName, isTerminated, initialScreenStream, onPermissionDenied, onFinish, onCheckpoint, showConfig = false }, ref) => {
         const router = useRouter();
 
         // -- State: Modular Flow --
@@ -78,11 +80,6 @@ const InterviewSessionV2 = forwardRef<InterviewSessionV2Ref, InterviewSessionV2P
         const messagesRef = useRef<Message[]>([]);
 
         useImperativeHandle(ref, () => ({
-            restartSharing: () => {
-                console.log("[V2] Restarting sharing...");
-                hasInitializedRef.current = false;
-                setupMedia();
-            }
         }));
 
         // -- Speech State --
@@ -148,33 +145,41 @@ const InterviewSessionV2 = forwardRef<InterviewSessionV2Ref, InterviewSessionV2P
         const setupMedia = async () => {
             if (hasInitializedRef.current) return;
             hasInitializedRef.current = true;
+
             try {
-                // Request Screen Sharing FIRST to enforce security
-                // @ts-ignore - displayMedia is standard but types might lag
-                const screenStream = await navigator.mediaDevices.getDisplayMedia({
-                    video: { displaySurface: 'monitor' },
-                    audio: false
-                });
+                let screenStream: MediaStream;
+
+                if (initialScreenStream && initialScreenStream.active) {
+                    console.log("[V2] Using pre-initialized screen stream.");
+                    screenStream = initialScreenStream;
+                } else {
+                    // Fallback to requesting Screen Sharing if not provided or inactive
+                    // @ts-ignore - displayMedia is standard but types might lag
+                    screenStream = await navigator.mediaDevices.getDisplayMedia({
+                        video: {
+                            // @ts-ignore
+                            displaySurface: 'monitor'
+                        },
+                        audio: false
+                    });
+                }
 
                 const settings = screenStream.getVideoTracks()[0].getSettings();
+
+                // Robust validation for displaySurface
                 // @ts-ignore
                 if (settings.displaySurface && settings.displaySurface !== 'monitor') {
-                    screenStream.getVideoTracks()[0].onended = null; // Detach to prevent double-strike
                     screenStream.getTracks().forEach(t => t.stop());
-                    if ((window as any).reportShieldViolation) {
-                        (window as any).reportShieldViolation('SHARE_LOSS', 'Full monitor sharing is mandatory. Please select "Entire Screen".');
-                    } else if (onPermissionDenied) {
-                        onPermissionDenied();
-                    }
+                    alert("Security Policy Violation: You must share your ENTIRE SCREEN (Monitor) to proceed.\n\nThe session will now restart. Please ensure you select the 'Entire Screen' tab in the sharing picker.");
+                    setIsActive(false);
+                    window.location.reload();
                     return;
                 }
 
                 // Handle screen share stop
                 screenStream.getVideoTracks()[0].onended = () => {
-                    console.log("[V2] Screen sharing track ended.");
-                    if ((window as any).reportShieldViolation) {
-                        (window as any).reportShieldViolation('SHARE_LOSS', 'Screen sharing was stopped.');
-                    } else if (onPermissionDenied) {
+                    console.warn("[V2] Screen sharing track ended. Terminating session.");
+                    if (isActive && onPermissionDenied) {
                         onPermissionDenied();
                     }
                 };
@@ -200,12 +205,15 @@ const InterviewSessionV2 = forwardRef<InterviewSessionV2Ref, InterviewSessionV2P
                 setStream(userStream);
                 setIsActive(true);
             } catch (e: any) {
-                console.error("Media setup failed", e);
-                // Treat picker cancellation or permission denial as a strike-able violation
-                if ((window as any).reportShieldViolation) {
-                    (window as any).reportShieldViolation('SHARE_LOSS', 'Screen sharing permission denied.');
-                } else if (onPermissionDenied) {
-                    onPermissionDenied();
+                hasInitializedRef.current = false; // Allow retry
+
+                if (e.name === 'NotAllowedError' || e.message?.includes('Permission denied')) {
+                    setIsActive(false); // CRITICAL: Prevent session from starting
+                    if (onPermissionDenied) {
+                        onPermissionDenied();
+                    }
+                } else {
+                    console.error("Media setup failed unexpectedly:", e);
                 }
             }
         };
@@ -415,17 +423,19 @@ ${data.candidateNote}
                     </div>
                 )}
                 {/* --- CONFIG MODAL --- */}
-                <FlowConfigurationModal
-                    isOpen={isConfigModalOpen}
-                    onClose={() => setIsConfigModalOpen(false)}
-                    currentFlow={flow}
-                    onSaveFlow={(newFlow) => {
-                        setFlow(newFlow);
-                        setCurrentRoundIndex(0);
-                        setMessages([]); // Reset chat
-                        triggerAI(true); // Restart with new flow
-                    }}
-                />
+                {showConfig && (
+                    <FlowConfigurationModal
+                        isOpen={isConfigModalOpen}
+                        onClose={() => setIsConfigModalOpen(false)}
+                        currentFlow={flow}
+                        onSaveFlow={(newFlow) => {
+                            setFlow(newFlow);
+                            setCurrentRoundIndex(0);
+                            setMessages([]); // Reset chat
+                            triggerAI(true); // Restart with new flow
+                        }}
+                    />
+                )}
 
                 {/* LEFT: Sidebar (20%) */}
                 <div className="w-[20%] h-full bg-white border-r border-slate-200 flex flex-col shadow-sm">
@@ -503,12 +513,14 @@ ${data.candidateNote}
                     </div>
 
                     <div className="mt-auto p-6 border-t border-slate-100">
-                        <button
-                            onClick={() => setIsConfigModalOpen(true)}
-                            className="w-full flex items-center justify-center gap-3 px-4 py-4 bg-slate-50 hover:bg-slate-100 text-slate-400 rounded-2xl transition-all duration-300 font-bold text-[10px] uppercase tracking-widest mb-2 border border-slate-100"
-                        >
-                            <Settings className="w-3.5 h-3.5" /> Customize Flow
-                        </button>
+                        {showConfig && (
+                            <button
+                                onClick={() => setIsConfigModalOpen(true)}
+                                className="w-full flex items-center justify-center gap-3 px-4 py-4 bg-slate-50 hover:bg-slate-100 text-slate-400 rounded-2xl transition-all duration-300 font-bold text-[10px] uppercase tracking-widest mb-2 border border-slate-100"
+                            >
+                                <Settings className="w-3.5 h-3.5" /> Customize Flow
+                            </button>
+                        )}
                         <button onClick={() => window.location.reload()} className="w-full flex items-center justify-center gap-3 px-4 py-4 bg-red-50/50 hover:bg-red-500 text-red-500 hover:text-white border border-red-100 hover:border-red-500 rounded-2xl transition-all duration-300 font-bold text-xs uppercase tracking-widest group">
                             <LogOut className="w-4 h-4 transition-transform group-hover:-translate-x-1" /> Quit Session
                         </button>
@@ -716,6 +728,16 @@ ${data.candidateNote}
                                 <textarea
                                     value={code}
                                     onChange={(e) => setCode(e.target.value)}
+                                    onPaste={(e) => {
+                                        e.preventDefault();
+                                        alert("Security Policy: Pasting is disabled for this session.");
+                                    }}
+                                    onCopy={(e) => {
+                                        e.preventDefault();
+                                    }}
+                                    onCut={(e) => {
+                                        e.preventDefault();
+                                    }}
                                     className="flex-1 w-full p-6 font-mono text-sm bg-slate-900 text-slate-50 resize-none focus:outline-none leading-relaxed"
                                     spellCheck={false}
                                     placeholder="Workspace initialized..."
