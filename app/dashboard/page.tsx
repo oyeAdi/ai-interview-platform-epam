@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { Play, FileText, Calendar, User, Search, Monitor, ShieldCheck, CheckCircle2, AlertCircle, RefreshCw, Shield, Trash2, X, AlertTriangle } from 'lucide-react';
 import GlobalHeader from '@/components/GlobalHeader';
 import ReactMarkdown from 'react-markdown';
@@ -25,7 +25,7 @@ interface Session {
 
 import { useSearchParams, useRouter } from 'next/navigation';
 
-export default function Dashboard() {
+function DashboardContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const initialClient = searchParams.get('client') || 'All';
@@ -544,7 +544,20 @@ export default function Dashboard() {
                     </div>
                 )
             }
-        </div >
+        </div>
+    );
+}
+
+export default function Dashboard() {
+    return (
+        <Suspense fallback={
+            <div className="h-screen flex flex-col items-center justify-center bg-slate-50 gap-4">
+                <RefreshCw size={40} className="animate-spin text-[#0095A9]" />
+                <div className="text-[#003040] font-black uppercase tracking-widest text-sm">Loading Dashboard...</div>
+            </div>
+        }>
+            <DashboardContent />
+        </Suspense>
     );
 }
 

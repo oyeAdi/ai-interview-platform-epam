@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Suspense } from 'react';
 import Link from 'next/link';
 // import interviewData from '@/data/interview_config.json'; // DELETED: Use DB instead
 import InterviewSession from '@/components/InterviewSession';
@@ -12,7 +12,7 @@ import ReactMarkdown from 'react-markdown'; // Restored
 
 import { useSearchParams, useRouter } from 'next/navigation';
 
-export default function Home() {
+function HomeContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const initialClient = searchParams.get('client') || 'All';
@@ -460,5 +460,20 @@ export default function Home() {
                 </div>
             </main>
         </div>
+    );
+}
+
+export default function Home() {
+    return (
+        <Suspense fallback={
+            <div className="h-screen flex flex-col items-center justify-center bg-white gap-4">
+                <div className="relative">
+                    <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-[#0095A9]"></div>
+                </div>
+                <div className="text-[#003040] font-black uppercase tracking-widest text-[10px]">Loading Portal...</div>
+            </div>
+        }>
+            <HomeContent />
+        </Suspense>
     );
 }
