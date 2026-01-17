@@ -5,13 +5,14 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(
     req: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
+        const { id } = await params;
         const { data, error } = await supabase
             .from('assessment_sessions')
             .select('*')
-            .eq('session_id', params.id)
+            .eq('session_id', id)
             .single();
 
         if (error || !data) {
@@ -20,7 +21,7 @@ export async function GET(
                 exists: false,
                 completed: false,
                 debugError: error,
-                params: params.id,
+                params: id,
                 envUrl: process.env.NEXT_PUBLIC_SUPABASE_URL
             });
         }
