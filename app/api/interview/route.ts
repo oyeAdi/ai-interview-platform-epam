@@ -131,7 +131,9 @@ export async function POST(req: NextRequest) {
             codingFocusAreas,
             isNewRound,
             roundType, // V2 Dynamic Round Type
-            roundContext // V2 Dynamic Context
+            roundContext, // V2 Dynamic Context
+            previousRoundSummary, // Captured summary from frontend
+            candidateName // Candidate Name
         } = body;
 
         if (!messages && type === 'chat') {
@@ -380,7 +382,7 @@ For Behavioral Questions: Competency-based assessment`;
                 JOB TITLE: ${selectedJob?.title || 'Unknown'}
                 SENIORITY LEVEL: ${selectedJob?.level || 'Not specified'}
 
-                ### EVALUATION NOTES BY ROUND:
+                ### Example EVALUATION NOTES BY ROUND:
     
                 **Round 0 (MCQ):** ${summaries?.[0] || 'No notes provided for MCQ round'}
     
@@ -814,13 +816,18 @@ For Behavioral Questions: Competency-based assessment`;
             : round;
 
         // Construct summary context from previous rounds
-        const summariesContext = Object.entries(summaries || {})
+        let summariesContext = Object.entries(summaries || {})
             .filter(([key, notes]) => (notes as string[]).length > 0 && key !== round)
             .map(([roundKey, notes]) => {
                 const roundTitle = roundKey.charAt(0) + roundKey.slice(1).toLowerCase().replace('_', ' ');
                 return `### PREVIOUS ROUND INSIGHTS: ${roundTitle}\n${(notes as string[]).slice(-5).join('\n')}`; // Keep last 5 notes per round for brevity
             })
             .join('\n\n');
+
+        // Append the explicit previous round summary if provided (V2 context)
+        if (previousRoundSummary) {
+            summariesContext = `### PREVIOUS ROUND SUMMARY:\n${previousRoundSummary}\n\n${summariesContext}`;
+        }
 
         // Context Trimming: If it's a new round, prune history to avoid "brain fog"
         let processedMessages = messages;
@@ -840,11 +847,24 @@ For Behavioral Questions: Competency-based assessment`;
                \nRULE: You MUST follow these instructions above all others. If there is a conflict, these win.`
             : '';
 
-        // V2 DYNAMIC ROUND CONTEXT
+        // V2 DYNAMIC ROUND CONTEXT - ABSOLUTE PRIORITY
         const dynamicRoundInstruction = roundContext
-            ? `\n### DYNAMIC ROUND INSTRUCTION (V2 CONFIG):
+            ? `\n### ⚠️ CRITICAL: DYNAMIC ROUND INSTRUCTION (V2 CONFIG) - ABSOLUTE PRIORITY ⚠️
                "${roundContext}"
-               \nRULE: This specific instruction overrides standard round behavior. Act strictly as this persona/instruction describes.`
+               
+               STRICT ENFORCEMENT RULES:
+               1. This instruction has ABSOLUTE PRIORITY over all other instructions
+               2. You MUST act ONLY as this persona/instruction describes
+               3. DO NOT ask questions outside the scope of this round type
+               4. DO NOT mix behavioral, technical, or other question types unless explicitly stated in this instruction
+               5. If this is a SYSTEM_DESIGN round, ask ONLY system design questions
+               6. If this is a CODING round, ask ONLY coding/algorithm questions
+               7. If this is a BEHAVIORAL round, ask ONLY behavioral questions
+               
+               VIOLATION CONSEQUENCES:
+               - Asking off-topic questions is a CRITICAL ERROR
+               - Stay strictly within the boundaries defined by this round context
+               - When in doubt, refer back to this instruction`
             : '';
 
         // Role-specific adaptations
@@ -1023,57 +1043,92 @@ CRITICAL RULES:
 DO NOT ask about skills outside this list unless absolutely necessary for context.`
             : '';
 
-        // Create conversation memory context
-        const conversationMemory = previousTopics.length > 0
-            ? `\n### CONVERSATION MEMORY - TOPICS ALREADY COVERED:
-${previousTopics.map((topic, i) => `${i + 1}. ${topic}`).join('\n')}
-
-IMPORTANT: DO NOT ask about these topics again. Choose NEW, DIFFERENT topics.`
-            : '';
+        // Disable explicit topic banning from current chat to allow depth (especially for System Design)
+        // The messages history already prevents verbatim repetition.
+        const conversationMemory = '';
 
         // Role-specific system prompt
         const systemPrompt = `
-          ${globalInstruction}
           ${dynamicRoundInstruction}
+          ${globalInstruction}
           
-          You are an EPAM ${roleType} Interviewer conducting a real interview.
+          You are Alex, an EPAM ${roleType} Interviewer conducting a real interview with ${candidateName || 'the candidate'}.
+          
+          YOUR PERSONA:
+          - Name: Alex
+          - Team: EPAM Engineering Team (aligned with ${selectedJob?.title || 'the role'})
+          - Tone: Professional, warm, and direct.
+          
+          CRITICAL OUTPUT RULE: NEVER use placeholders like "[Your Name]", "[Team Name]", or "[Insert Date]". ALWAYS invent a plausible detail or use the defaults provided above.
+          
           ROLE TYPE: ${roleType}
           JOB TITLE: ${selectedJob?.title || 'Unknown Position'}
           SENIORITY: ${selectedJob?.level || 'Not Specified'}
           
           ${conversationMemory}
           
-          current_phase_instruction: ${roundPrompts[roundNum] || roundPrompts[1]}
+          current_phase_instruction: ${roundContext ? "STRICTLY FOLLOW DYNAMIC ROUND INSTRUCTION ABOVE." : (roundPrompts[roundNum] || roundPrompts[1])}
           
           INTERVIEW FLOW RULES:
-          1. REAL INTERVIEW SIMULATION: Act like a human interviewer who remembers the conversation.
-          2. NO REPETITION: Never ask the same question or discuss the same topic twice.
-          3. PROGRESSIVE DEPTH: Start with basics, then go deeper into selected areas.
-          4. NATURAL TRANSITIONS: Move between topics naturally when one is sufficiently covered.
-          5. ACTIVE LISTENING: Build on the candidate's responses, don't just read from a script.
+          1. REAL INTERVIEW SIMULATION: Act like a human interviewer who remembers the current and PREVIOUS conversation.
+          2. NO REPETITION: Never ask the same question or discuss the same topic twice (checking memory first).
+          3. TOPIC MANAGEMENT: Start with basics. STRICTLY LIMIT follow-up questions to MAX 2-3 per topic. Move to the next skill requirement after that.
+          4. NATURAL TRANSITIONS: Move between topics naturally. AVOID robotic phrases like "Let's switch gears" or "Okay, moving on". Instead, weave the next topic into the previous answer (e.g., "That approach to concurrency is interesting. How would that scale if...").
+          5. ACTIVE LISTENING: Build on the candidate's responses.
+          6. PERSONALITY: Be warm, professional, and conversational. Use the candidate's name. Acknowledge their insights before challenging them.
           
           ${skillsContext}
           
           ${isNewRound ? `
           ### NEW ROUND STARTING
-          - This is a fresh round with new objectives.
-          - Reset your mental context for this round type.
-          - Start with an appropriate opening question/statement.` : ''}
+          ${!previousRoundSummary ?
+                    `- THIS IS THE START OF THE INTERVIEW.
+             - Welcome ${candidateName || 'the candidate'} professionally.
+             - DO NOT say "Let's shift focus" or "Switching gears" as there is nothing prior.
+             - Start directly with the first question.`
+                    :
+                    `- This is a fresh round with new objectives.
+             - Reset your mental context for this round type.`}
+          - Start with an appropriate opening question/statement.
+          - CRITICAL: DO NOT start with "Let's switch gears", "Let's shift our focus", or "Moving on". BE NATURAL. Instead, state the new topic directly (e.g., "Let's look at [topic] now").` : ''}
 
           ${summariesContext ? `
-### KNOWLEDGE ACQUIRED FROM PREVIOUS ROUNDS:
+### READ-ONLY CONTEXT FROM PREVIOUS ROUNDS:
+(Use this strictly for background knowledge. DO NOT REVISIT these topics effectively unless the CURRENT round explicitly requires connecting back to them.)
 ${summariesContext}
         ` : ''}
 
           ### REAL INTERVIEW BEHAVIOR:
-          - Remember what has been discussed (use the summaries above as your primary "memory" for past rounds)
-          - Build upon previous answers
+          - Remember what has been discussed (use the summaries above as background context only)
+          - Build upon previous answers ONLY if relevant to the CURRENT round type
           - Ask follow-up questions that show you're listening
           - Avoid robotic, repetitive questioning
           - Adapt to the candidate's level and responses
           
+          ### INPUT VALIDATION & QUALITY CONTROL (CRITICAL):
+          1. **GIBBERISH DETECTION**: If the candidate provides non-sensical input (e.g., "asdasd", "bla bla", random chars), DO NOT accept it.
+             - WRONG: "Thanks for that. Moving on..."
+             - CORRECT: "I didn't quite catch that. Could you please repeat?" or "I'm not sure I follow. Can you clarify?"
+          2. **IGNORE ATTEMPTS**: If the candidate ignores the question, DO NOT proceed. Press them gently again.
+          3. **NO BLIND AFFIRMATION**: NEVER say "That's a great answer" or "Helpful overview" if the input was garbage. Only validate valid technical content.
+          4. **LENGTH CHECK**: If the answer is one word (e.g., "Yes", "No") for a complex question, ask for elaboration ("Could you expand on why?").
+          
           ### INSTRUCTION PRIORITY RULE:
-          The 'GLOBAL DM INSTRUCTIONS' at the top are highest priority. Follow those first.
+          1. HIGHEST PRIORITY: V2 Dynamic Round Instruction (Top of Prompt)
+          2. The current round's objective overrides any previous context. If this is System Design, DO NOT ask Coding or Conceptual questions even if mentioned in summaries.
+          3. HIGHEST PRIORITY: V2 Dynamic Round Instruction (if present)
+          4. SECOND PRIORITY: Global DM Instructions
+          5. THIRD PRIORITY: Standard round behavior
+
+          ${roundType === 'CODING' ? `
+          ### !!! STRICT CODING MODE ACTIVE !!!
+          - YOU ARE NOW A CODE COMPILER/EVALUATOR.
+          - DO NOT ask behavioral questions (e.g., "Tell me about a time...", "Mentorship experience").
+          - DO NOT make small talk.
+          - YOUR ONLY GOAL: Present a CODING PROBLEM (LeetCode Style) immediately if one is not active.
+          - IF this is the start of the round: "Here is your coding challenge: [Title]..."
+          - IGNORE previous round context about "Leadership" or "Mentorship".
+          ` : ''}
 
           RESPONSE FORMAT (JSON):
           {
@@ -1090,7 +1145,7 @@ ${summariesContext}
           4. DEPTH: Explore topics thoroughly before moving on.
           5. NATURAL: Sound like a human, not a question bank.
 
-          ${ROUND_GUARDIANS[roundNum] || ROUND_GUARDIANS[1]}
+          ${!roundContext ? ROUND_GUARDIANS[roundNum] || ROUND_GUARDIANS[1] : ''}
         `;
 
         // Combine messages into a single user prompt

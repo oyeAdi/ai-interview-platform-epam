@@ -4,28 +4,41 @@ import * as admin from 'firebase-admin';
 
 const isFirebaseConfigured = !!(process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY);
 
-if (isFirebaseConfigured && !admin.apps.length) {
-    try {
-        const privateKey = process.env.FIREBASE_PRIVATE_KEY!.replace(/^["']|["']$/g, '').replace(/\\n/g, '\n');
+let storageApp: admin.app.App | null = null;
 
-        admin.initializeApp({
-            credential: admin.credential.cert({
-                projectId: process.env.FIREBASE_PROJECT_ID,
-                clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-                privateKey: privateKey,
-            }),
-            storageBucket: process.env.FIREBASE_STORAGE_BUCKET || `${process.env.FIREBASE_PROJECT_ID}.firebasestorage.app`
-        });
-        console.log('[Firebase Admin] Initialization successful');
-    } catch (error: any) {
-        console.error('[Firebase Admin] Initialization failed:', error.message);
+if (isFirebaseConfigured) {
+    const appName = 'storage-admin';
+    const existingApp = admin.apps.find(app => app?.name === appName);
+
+    if (existingApp) {
+        storageApp = existingApp;
+    } else {
+        try {
+            const rawKey = process.env.FIREBASE_PRIVATE_KEY || '';
+            const privateKey = rawKey.replace(/^["']|["']$/g, '').replace(/\\n/g, '\n');
+
+            console.log(`[Firebase Admin] Initializing named app: ${appName} for project: ${process.env.FIREBASE_PROJECT_ID}`);
+            console.log(`[Firebase Admin] Key Length detected: ${privateKey.length}`);
+
+            if (privateKey.length < 100) {
+                throw new Error('Firebase private key seems too short or malformed.');
+            }
+
+            storageApp = admin.initializeApp({
+                credential: admin.credential.cert({
+                    projectId: process.env.FIREBASE_PROJECT_ID,
+                    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+                    privateKey: privateKey,
+                }),
+                storageBucket: process.env.FIREBASE_STORAGE_BUCKET || `${process.env.FIREBASE_PROJECT_ID}.firebasestorage.app`
+            }, appName);
+            console.log('[Firebase Admin] Named app initialization successful');
+        } catch (error: any) {
+            console.error('[Firebase Admin] Named app initialization failed:', error.message);
+        }
     }
-} else if (!isFirebaseConfigured) {
-    console.warn('[Firebase Admin] Configuration missing:', {
-        projectId: !!process.env.FIREBASE_PROJECT_ID,
-        clientEmail: !!process.env.FIREBASE_CLIENT_EMAIL,
-        privateKey: !!process.env.FIREBASE_PRIVATE_KEY
-    });
+} else {
+    console.warn('[Firebase Admin] Configuration missing. Check .env.local');
 }
 
-export const bucket = isFirebaseConfigured ? admin.storage().bucket() : null;
+export const bucket = storageApp ? storageApp.storage().bucket() : null;

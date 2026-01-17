@@ -20,11 +20,24 @@ export async function GET(
         if (error) throw error;
         if (!data) return NextResponse.json({ error: 'Session not found' }, { status: 404 });
 
+        // Fetch Job Title if missing
+        let jobTitle = data.job_title || data.config?.jobTitle;
+        if (!jobTitle && data.job_id) {
+            const { data: jobData } = await supabaseAdmin
+                .from('job_roles')
+                .select('title')
+                .eq('id', data.job_id)
+                .single();
+            if (jobData) jobTitle = jobData.title;
+        }
+
         // Format to match what frontend expects
         const response = {
             jobId: data.job_id,
+            jobTitle: jobTitle || 'Technical Assessment',
             candidateName: data.candidate_name,
             candidateEmail: data.candidate_email,
+            client: data.client, // Now returning client
             skills: data.config?.skills || [],
             config: data.config
         };

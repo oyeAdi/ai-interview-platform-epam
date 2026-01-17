@@ -7,7 +7,7 @@ import {
     CheckCircle2, AlertCircle, Clock, Zap, ListChecks,
     MessageSquare, Code, Layout, ChevronRight, LogOut,
     CheckCircle, ShieldCheck, Settings, Monitor, Play, ShieldAlert, Lock, XCircle,
-    MonitorX, Maximize2, Shield
+    MonitorX, Maximize2, Shield, Volume2, VolumeX
 } from 'lucide-react';
 import clsx from 'clsx';
 import Markdown from 'react-markdown';
@@ -15,6 +15,8 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { RoundDefinition, DEFAULT_FLOW } from '@/data/round_presets';
 import FlowConfigurationModal from './interview/FlowConfigurationModal';
+// @ts-ignore
+import fixWebmDuration from 'fix-webm-duration';
 
 // --- Types ---
 type Message = {
@@ -32,17 +34,21 @@ interface InterviewSessionV2Props {
     onFinish?: (messages: any[], summaries: string[], recordingBlob: Blob | null, fullReport: string) => void;
     onCheckpoint?: (transcript: any[], fullReport: string) => void;
     showConfig?: boolean;
+    skills?: string[];
+    customInstructions?: string;
+    initialFlow?: RoundDefinition[];
 }
 
 export interface InterviewSessionV2Ref {
+    finishInterview: () => Promise<void>;
 }
 
 const InterviewSessionV2 = forwardRef<InterviewSessionV2Ref, InterviewSessionV2Props>(
-    ({ jobId: initialJobId, candidateName: initialCandidateName, isTerminated, initialScreenStream, onPermissionDenied, onFinish, onCheckpoint, showConfig = false }, ref) => {
+    ({ jobId: initialJobId, candidateName: initialCandidateName, isTerminated, initialScreenStream, onPermissionDenied, onFinish, onCheckpoint, showConfig = false, skills: propSkills, customInstructions: propInstructions, initialFlow }, ref) => {
         const router = useRouter();
 
         // -- State: Modular Flow --
-        const [flow, setFlow] = useState<RoundDefinition[]>(DEFAULT_FLOW);
+        const [flow, setFlow] = useState<RoundDefinition[]>(initialFlow || DEFAULT_FLOW);
         const [currentRoundIndex, setCurrentRoundIndex] = useState(0);
         const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
         const [hydrated, setHydrated] = useState(false);
@@ -50,8 +56,8 @@ const InterviewSessionV2 = forwardRef<InterviewSessionV2Ref, InterviewSessionV2P
         // -- Candidate/Job State (Internal) --
         const [jobId, setJobId] = useState(initialJobId || '');
         const [candidateName, setCandidateName] = useState(initialCandidateName || '');
-        const [skills, setSkills] = useState<string[]>([]);
-        const [customInstructions, setCustomInstructions] = useState('');
+        const [skills, setSkills] = useState<string[]>(propSkills || []);
+        const [customInstructions, setCustomInstructions] = useState(propInstructions || '');
 
         // -- Derived State --
         const currentRound = flow[currentRoundIndex] || flow[0];
@@ -59,10 +65,20 @@ const InterviewSessionV2 = forwardRef<InterviewSessionV2Ref, InterviewSessionV2P
 
         // -- Core State --
         const [isActive, setIsActive] = useState(false);
+        const [isAudioEnabled, setIsAudioEnabled] = useState(true);
         const [messages, setMessages] = useState<Message[]>([]);
         const [input, setInput] = useState('');
         const [isLoading, setIsLoading] = useState(false);
-        const [timeLeft, setTimeLeft] = useState(30 * 60); // 30 mins default
+        const [timeLeft, setTimeLeft] = useState(() => {
+            const initialSeconds = (initialFlow || DEFAULT_FLOW).reduce((acc, round) => acc + (round.timeLimit || 900), 0);
+            return initialSeconds;
+        }); // Initialized based on flow immediately
+
+        // Recalculate Timer whenever Flow changes (e.g. via Config Modal)
+        useEffect(() => {
+            const totalSeconds = flow.reduce((acc, round) => acc + (round.timeLimit || 900), 0);
+            setTimeLeft(totalSeconds);
+        }, [flow]);
         const [isTransitioning, setIsTransitioning] = useState(false);
         const [transitionMessage, setTransitionMessage] = useState('');
         const [technicalReport, setTechnicalReport] = useState<string>('');
@@ -77,9 +93,13 @@ const InterviewSessionV2 = forwardRef<InterviewSessionV2Ref, InterviewSessionV2P
         const chunksRef = useRef<Blob[]>([]);
         const recorderRef = useRef<MediaRecorder | null>(null);
         const activeStreamsRef = useRef<MediaStream[]>([]);
+        const recordingStartTimeRef = useRef<number>(0);
         const messagesRef = useRef<Message[]>([]);
 
         useImperativeHandle(ref, () => ({
+            finishInterview: async () => {
+                await finishInterview();
+            }
         }));
 
         // -- Speech State --
@@ -94,6 +114,17 @@ const InterviewSessionV2 = forwardRef<InterviewSessionV2Ref, InterviewSessionV2P
         // --- Hydration ---
         useEffect(() => {
             const hydrate = async () => {
+                // If props are provided, we consider it "hydrated" immediately or after one cycle
+                if (propSkills || propInstructions || initialFlow) {
+                    if (propSkills) setSkills(propSkills);
+                    if (propInstructions) setCustomInstructions(propInstructions);
+                    if (initialFlow) setFlow(initialFlow);
+                    if (initialJobId) setJobId(initialJobId);
+                    if (initialCandidateName) setCandidateName(initialCandidateName);
+                    setHydrated(true);
+                    return;
+                }
+
                 const params = new URLSearchParams(window.location.search);
                 const sessionId = params.get('sessionId');
                 const token = params.get('token');
@@ -201,6 +232,7 @@ const InterviewSessionV2 = forwardRef<InterviewSessionV2Ref, InterviewSessionV2P
                     if (e.data.size > 0) chunksRef.current.push(e.data);
                 };
                 recorder.start(1000);
+                recordingStartTimeRef.current = Date.now();
 
                 setStream(userStream);
                 setIsActive(true);
@@ -232,10 +264,12 @@ const InterviewSessionV2 = forwardRef<InterviewSessionV2Ref, InterviewSessionV2P
 
         // --- Initial AI Trigger ---
         useEffect(() => {
-            if (isActive && hydrated && messages.length === 0) {
+            // Only auto-trigger for the very first round.
+            // Subsequent rounds are triggered manually by handleNextRound to pass context summaries.
+            if (isActive && hydrated && messages.length === 0 && currentRoundIndex === 0) {
                 triggerAI(true);
             }
-        }, [isActive, hydrated, messages.length]);
+        }, [isActive, hydrated, messages.length, currentRoundIndex]);
 
         // --- Timer ---
         useEffect(() => {
@@ -251,12 +285,16 @@ const InterviewSessionV2 = forwardRef<InterviewSessionV2Ref, InterviewSessionV2P
 
 
         // --- AI Logic ---
-        const triggerAI = async (isStart = false, userReply?: string) => {
+        const triggerAI = async (isStart = false, userReply?: string, previousRoundSummary?: string, overrideRoundIndex?: number) => {
             setIsLoading(true);
 
-            // Construct context based on CURRENT ROUND definition
-            const roundContext = currentRound.systemPromptContext;
-            const roundType = currentRound.type;
+            // FIX: Use override index if provided (during transitions), otherwise use current state
+            const targetIndex = overrideRoundIndex !== undefined ? overrideRoundIndex : currentRoundIndex;
+            const targetRound = flow[targetIndex];
+
+            // Construct context based on TARGET ROUND definition
+            const roundContext = targetRound.systemPromptContext;
+            const roundType = targetRound.type;
 
             const payload = {
                 messages: isStart ? [] : [...messages, { role: 'user', text: userReply || 'Ready.' }],
@@ -265,8 +303,10 @@ const InterviewSessionV2 = forwardRef<InterviewSessionV2Ref, InterviewSessionV2P
                 roundType: roundType, // V2 Specific
                 roundContext: roundContext, // V2 Specific: Inject dynamic instructions
                 isNewRound: isStart,
+                previousRoundSummary: previousRoundSummary, // Pass context from previous rounds
                 // Include extra context
                 customSkills: skills,
+                candidateName: candidateName,
                 customInstructions: customInstructions
             };
 
@@ -315,8 +355,8 @@ ${data.candidateNote}
                     }
                 }
 
-                // Speak response
-                if (window.speechSynthesis) {
+                // Speak response only if audio is enabled
+                if (window.speechSynthesis && isAudioEnabled) {
                     window.speechSynthesis.cancel(); // Clear previous
                     const utterance = new SpeechSynthesisUtterance(data.text);
                     window.speechSynthesis.speak(utterance);
@@ -347,9 +387,13 @@ ${data.candidateNote}
 
                 if (recorderRef.current.state !== 'inactive') {
                     recorderRef.current.onstop = () => {
-                        const blob = new Blob(chunksRef.current, { type: 'video/webm' });
-                        activeStreamsRef.current.forEach(s => s.getTracks().forEach(t => t.stop()));
-                        resolve(blob);
+                        const duration = Date.now() - recordingStartTimeRef.current;
+                        const rawBlob = new Blob(chunksRef.current, { type: 'video/webm' });
+
+                        fixWebmDuration(rawBlob, duration, (fixedBlob: Blob) => {
+                            activeStreamsRef.current.forEach(s => s.getTracks().forEach(t => t.stop()));
+                            resolve(fixedBlob);
+                        });
                     };
                     recorderRef.current.stop();
                 } else {
@@ -384,6 +428,13 @@ ${data.candidateNote}
             }
         };
 
+        const toggleAudio = () => {
+            if (isAudioEnabled) {
+                window.speechSynthesis.cancel();
+            }
+            setIsAudioEnabled(prev => !prev);
+        };
+
         const handleNextRound = () => {
             if (isLastRound) {
                 finishInterview();
@@ -396,10 +447,18 @@ ${data.candidateNote}
 
             setTimeout(() => {
                 setCurrentRoundIndex(nextIndex);
-                setMessages(prev => [...prev, { role: 'model', text: `Transitioning to ${flow[nextIndex].title}...` }]);
 
-                // Trigger AI with "isStart=true" to initialize the NEW round context
-                triggerAI(true);
+                // CRITICAL FIX: Clear conversation history for new round
+                setMessages([]);
+                messagesRef.current = [];
+
+                // Generate summary of all previous rounds to maintain context without bloat
+                const contextSummary = Object.entries(roundSummaries)
+                    .map(([rId, notes]) => `Round ${rId} Summary: ${notes.join('; ')}`)
+                    .join('\n');
+
+                // Trigger AI with "isStart=true" to initialize the NEW round context, passing summary AND new index
+                triggerAI(true, undefined, contextSummary, nextIndex);
                 setIsTransitioning(false);
             }, 3000);
         };
@@ -440,12 +499,26 @@ ${data.candidateNote}
                 {/* LEFT: Sidebar (20%) */}
                 <div className="w-[20%] h-full bg-white border-r border-slate-200 flex flex-col shadow-sm">
                     <div className="p-6">
-                        <div className="flex items-center gap-3 mb-8">
-                            <div className="w-10 h-10 bg-[#0095A9] rounded-xl flex items-center justify-center font-black text-white text-xs shadow-lg shadow-[#0095A9]/20">EP</div>
-                            <div>
-                                <h2 className="text-sm font-bold text-slate-900 tracking-tight">EPAM</h2>
-                                <p className="text-[10px] text-slate-400 font-medium uppercase tracking-[0.2em]">Interviewer v2.0</p>
+                        <div className="flex items-center justify-between mb-8">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-[#0095A9] rounded-xl flex items-center justify-center font-black text-white text-xs shadow-lg shadow-[#0095A9]/20">EP</div>
+                                <div>
+                                    <h2 className="text-sm font-bold text-slate-900 tracking-tight">EPAM</h2>
+                                    <p className="text-[10px] text-slate-400 font-medium uppercase tracking-[0.2em]">Interviewer v2.0</p>
+                                </div>
                             </div>
+                            <button
+                                onClick={toggleAudio}
+                                className={clsx(
+                                    "p-2 rounded-lg transition-all border",
+                                    isAudioEnabled
+                                        ? "bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200"
+                                        : "bg-red-50 text-red-500 border-red-100 hover:bg-red-100"
+                                )}
+                                title={isAudioEnabled ? "Mute AI" : "Unmute AI"}
+                            >
+                                {isAudioEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                            </button>
                         </div>
 
                         <div className="relative aspect-video rounded-2xl bg-slate-50 border border-slate-200 overflow-hidden shadow-inner group">

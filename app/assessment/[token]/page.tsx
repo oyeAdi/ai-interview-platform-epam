@@ -106,7 +106,7 @@ export default function AssessmentLanding() {
                 }
             }
 
-            // 2. Send Metadata to Archive API (No large blob here!)
+            // 2. Send Metadata to Archive API (No large blob unless direct upload failed!)
             const formData = new FormData();
             formData.append('transcript', JSON.stringify(messages, null, 2));
             formData.append('report', fullReport);
@@ -115,8 +115,13 @@ export default function AssessmentLanding() {
             formData.append('timestamp', timestamp);
             formData.append('candidateName', tokenData?.candidateName || 'Unknown');
             formData.append('candidateEmail', tokenData?.candidateEmail || '');
+            formData.append('client', 'Systems'); // Defaulting to Systems for visibility
+
             if (recordingPath) {
                 formData.append('recordingPath', recordingPath);
+            } else if (recordingBlob) {
+                // If direct upload failed or was skipped, send blob to API as fallback
+                formData.append('recording', recordingBlob, 'recording.webm');
             }
 
             console.log('[Assessment] Archiving session metadata...');

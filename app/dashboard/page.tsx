@@ -16,6 +16,7 @@ interface Session {
     folderName: string;
     date: string;
     jobId: string;
+    jobTitle?: string;
     candidateName: string;
     candidateEmail?: string;
     reportPreview: string;
@@ -225,7 +226,7 @@ function DashboardContent() {
                                         "text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md",
                                         selectedSession?.id === session.id ? "bg-[#0095A9] text-white" : "bg-slate-100 text-slate-500"
                                     )}>
-                                        {session.jobId}
+                                        {session.jobTitle || session.jobId}
                                     </span>
                                     <span className="text-[10px] text-slate-300 font-bold">{new Date(session.date).toLocaleDateString()}</span>
                                 </div>
@@ -268,7 +269,7 @@ function DashboardContent() {
                                         </h2>
                                         <div className="mt-1 flex items-center gap-2 px-3 py-1 bg-slate-50 rounded-full border border-slate-100">
                                             <div className="w-1.5 h-1.5 rounded-full bg-[#0095A9] animate-pulse" />
-                                            <span className="text-[10px] text-[#0095A9] font-black uppercase tracking-widest">{selectedSession.jobId}</span>
+                                            <span className="text-[10px] text-[#0095A9] font-black uppercase tracking-widest">{selectedSession.jobTitle || selectedSession.jobId}</span>
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-4 text-xs text-slate-400 font-bold uppercase tracking-widest">
@@ -306,12 +307,6 @@ function DashboardContent() {
                             {/* TAB NAVIGATION */}
                             <div className="px-8 pt-6 pb-2 bg-white flex items-center gap-1 border-b border-slate-50">
                                 <TabTrigger
-                                    active={activeTab === 'verdict'}
-                                    onClick={() => setActiveTab('verdict')}
-                                    icon={<ShieldCheck size={16} />}
-                                    label="Final Verdict"
-                                />
-                                <TabTrigger
                                     active={activeTab === 'video'}
                                     onClick={() => setActiveTab('video')}
                                     icon={<Monitor size={16} />}
@@ -322,6 +317,12 @@ function DashboardContent() {
                                     onClick={() => setActiveTab('protocol')}
                                     icon={<FileText size={16} />}
                                     label="Full Protocol"
+                                />
+                                <TabTrigger
+                                    active={activeTab === 'verdict'}
+                                    onClick={() => setActiveTab('verdict')}
+                                    icon={<ShieldCheck size={16} />}
+                                    label="Final Verdict"
                                 />
                             </div>
 

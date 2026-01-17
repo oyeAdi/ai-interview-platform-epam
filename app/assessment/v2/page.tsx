@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import InterviewSessionV2, { InterviewSessionV2Ref } from '@/components/InterviewSessionV2';
 import AssessmentShield from '@/components/AssessmentShield';
-import { Play, Loader2, AlertCircle, ShieldAlert, Monitor, ShieldCheck, MonitorX, Maximize2, Shield, Lock, CheckCircle2, XCircle } from 'lucide-react';
+import { Play, Loader2, AlertCircle, ShieldAlert, Monitor, ShieldCheck, MonitorX, Maximize2, Shield, Lock, CheckCircle2, XCircle, ArrowRight } from 'lucide-react';
 import clsx from 'clsx';
 
 export default function AssessmentV2Page() {
@@ -11,83 +11,282 @@ export default function AssessmentV2Page() {
     const [sessionId, setSessionId] = useState('');
     const [isTerminated, setIsTerminated] = useState(false);
     const [permissionDenied, setPermissionDenied] = useState(false);
-    const [candidateName, setCandidateName] = useState('Test Candidate');
-    const [jobTitle, setJobTitle] = useState('Senior Product Designer');
+    const [candidateName, setCandidateName] = useState('');
+    const [candidateEmail, setCandidateEmail] = useState('');
+    const [jobId, setJobId] = useState('V2-TEST-ROLE');
+    const [jobTitle, setJobTitle] = useState('Technical Assessment');
     const [completed, setCompleted] = useState(false);
     const [finishing, setFinishing] = useState(false);
     const [securitySetupComplete, setSecuritySetupComplete] = useState(false);
     const [activeStream, setActiveStream] = useState<MediaStream | null>(null);
     const [hasConsented, setHasConsented] = useState(false);
+    const [loading, setLoading] = useState(true);
+    const [skills, setSkills] = useState<string[]>([]);
+    const [customInstructions, setCustomInstructions] = useState('');
+    const [flow, setFlow] = useState<any[]>([]); // We use any[] for now to match DEFAULT_FLOW
+    const [client, setClient] = useState('Systems'); // Added client state
+    const [alreadyCompleted, setAlreadyCompleted] = useState(false);
+    const [completedAt, setCompletedAt] = useState<string | null>(null);
+    const [uploadProgress, setUploadProgress] = useState(0); // Added for XHR progress
     const interviewRef = useRef<InterviewSessionV2Ref>(null);
 
     useEffect(() => {
-        // Generate a stable Session ID immediately
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        setSessionId(`v2_session_${timestamp}`);
+        const hydrate = async () => {
+            const params = new URLSearchParams(window.location.search);
+            const urlSessionId = params.get('sessionId');
+            const token = params.get('token');
+
+            if (urlSessionId) {
+                setSessionId(urlSessionId);
+                try {
+                    const res = await fetch(`/api/session/${urlSessionId}`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        console.log("[Assessment V2] Hydrated from sessionId:", {
+                            candidateName: data.candidateName,
+                            jobId: data.jobId,
+                            client: data.client
+                        });
+                        setCandidateName(data.candidateName || 'Loading...');
+                        setCandidateEmail(data.candidateEmail || '');
+                        setJobId(data.jobId || 'V2-TEST-ROLE');
+                        setJobTitle(data.jobTitle || data.config?.jobTitle || 'Technical Assessment');
+                        setSkills(data.skills || []);
+                        setCustomInstructions(data.config?.customInstructions || '');
+                        setFlow(data.config?.customFlow || []);
+                        setClient(data.client || 'Systems');
+                    }
+                } catch (e) {
+                    console.error("Failed to hydrate from sessionId", e);
+                }
+            } else if (token) {
+                try {
+                    const jsonStr = decodeURIComponent(atob(token).split('').map((c) => {
+                        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+                    }).join(''));
+                    const data = JSON.parse(jsonStr);
+                    console.log("[Assessment V2] Hydrated from token:", {
+                        candidateName: data.candidateName,
+                        jobId: data.jobId
+                    });
+                    setCandidateName(data.candidateName || 'Loading...');
+                    setCandidateEmail(data.candidateEmail || '');
+                    setJobId(data.jobId || 'V2-TEST-ROLE');
+                    setJobTitle(data.jobTitle || 'Technical Assessment');
+                    setSkills(data.skills || []);
+                    setCustomInstructions(data.config?.customInstructions || '');
+                    setFlow(data.config?.customFlow || []);
+
+                    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+                    const newSessionId = `v2_session_${data.jobId || 'unknown'}_${ts}`;
+                    setSessionId(newSessionId);
+
+                    // Persist session ID in URL to prevent reset on reload
+                    const newUrl = new URL(window.location.href);
+                    newUrl.searchParams.set('sessionId', newSessionId);
+                    window.history.replaceState({}, '', newUrl);
+                } catch (e) {
+                    console.error("Failed to hydrate from token", e);
+                }
+            } else {
+                // Default fallback
+                const ts = new Date().toISOString().replace(/[:.]/g, '-');
+                setSessionId(`v2_session_${ts}`);
+            }
+
+            // Check if session is already completed (prevent retakes)
+            if (urlSessionId) {
+                try {
+                    const statusRes = await fetch(`/api/session/${urlSessionId}/status`, { cache: 'no-store' });
+                    if (statusRes.ok) {
+                        const statusData = await statusRes.json();
+                        if (statusData.completed) {
+                            console.log('[Assessment V2] Session already completed:', statusData.completedAt);
+                            setAlreadyCompleted(true);
+                            setCompletedAt(statusData.completedAt);
+                        }
+                    }
+                } catch (e) {
+                    console.error('[Assessment V2] Failed to check session status:', e);
+                }
+            }
+
+            setLoading(false);
+        };
+        hydrate();
     }, []);
 
     const handleStart = () => {
         setStarted(true);
     };
 
+    // --- PARALLEL MULTIPART UPLOADER ---
+    const uploadMultipart = async (blob: Blob, fileName: string, setProgress: (p: number) => void) => {
+        const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
+        const totalParts = Math.ceil(blob.size / CHUNK_SIZE);
+
+        // 1. Initialize
+        const initRes = await fetch('/api/upload/multipart', {
+            method: 'POST',
+            body: JSON.stringify({ action: 'init', fileName, fileType: blob.type })
+        });
+        if (!initRes.ok) throw new Error("Failed to init multipart");
+        const { uploadId, key } = await initRes.json();
+
+        // 2. Prepare Chunks & Get Signed URLs
+        const parts = [];
+        for (let i = 0; i < totalParts; i++) {
+            parts.push({ partNumber: i + 1 });
+        }
+
+        const signRes = await fetch('/api/upload/multipart', {
+            method: 'POST',
+            body: JSON.stringify({ action: 'sign_parts', uploadId, key, parts })
+        });
+        if (!signRes.ok) throw new Error("Failed to sign parts");
+        const { signedUrls } = await signRes.json();
+
+        // 3. Parallel Upload (Concurrency Limit: 3)
+        let completedParts = 0;
+        const uploadedParams: any[] = [];
+        const CONCURRENCY = 3;
+
+        const uploadChunk = async (partNum: number, url: string) => {
+            const start = (partNum - 1) * CHUNK_SIZE;
+            const end = Math.min(start + CHUNK_SIZE, blob.size);
+            const chunk = blob.slice(start, end);
+
+            await fetch(url, {
+                method: 'PUT',
+                body: chunk
+            });
+
+            completedParts++;
+            setProgress(Math.round((completedParts / totalParts) * 100));
+
+            uploadedParams.push({ PartNumber: partNum, ETag: "ignored-by-r2-usually-but-needed" });
+            // Note: Real S3 needs ETag from response. R2 might be lenient, or we need to capture Etag header.
+            // For now assuming R2 + AWS SDK 'Complete' will verify presence on server side or we skip ETag check if possible.
+            // ACTUALLY: CompleteMultipartUpload NEEDS ETags.
+            // Fetch/XHR doesn't easily expose ETag unless CORS exposes it.
+            // Let's assume standard AWS SDK behavior: We MUST extract ETag.
+        };
+
+        // Redoing uploadChunk to capture ETag
+        const uploadChunkWithEtag = async (partNum: number, url: string) => {
+            const start = (partNum - 1) * CHUNK_SIZE;
+            const end = Math.min(start + CHUNK_SIZE, blob.size);
+            const chunk = blob.slice(start, end);
+
+            return new Promise<void>((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open('PUT', url, true);
+                xhr.onload = () => {
+                    if (xhr.status === 200) {
+                        const etag = xhr.getResponseHeader('ETag');
+                        uploadedParams.push({ PartNumber: partNum, ETag: etag?.replaceAll('"', '') });
+                        completedParts++;
+                        setProgress(Math.round((completedParts / totalParts) * 100));
+                        resolve();
+                    } else {
+                        reject(new Error(`Part ${partNum} failed`));
+                    }
+                };
+                xhr.onerror = () => reject(new Error("Network Error"));
+                xhr.send(chunk);
+            });
+        };
+
+        // Execution Queue
+        const queue = signedUrls.slice();
+        const worker = async () => {
+            while (queue.length > 0) {
+                const task = queue.shift();
+                if (task) await uploadChunkWithEtag(task.partNumber, task.url);
+            }
+        };
+
+        await Promise.all(Array(CONCURRENCY).fill(null).map(worker));
+
+        // 4. Complete
+        const completeRes = await fetch('/api/upload/multipart', {
+            method: 'POST',
+            body: JSON.stringify({
+                action: 'complete',
+                uploadId,
+                key,
+                parts: uploadedParams.sort((a, b) => a.PartNumber - b.PartNumber)
+            })
+        });
+
+        if (!completeRes.ok) throw new Error("Multipart completion failed");
+        return key; // Return the path
+    };
+
     const handleFinish = async (messages: any[], summaries: string[], recordingBlob: Blob | null, fullReport: string) => {
         setFinishing(true);
         try {
-            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-            let recordingPath = '';
-
-            // 1. Direct Upload to Firebase if recording exists
-            if (recordingBlob) {
-                try {
-                    console.log('[Assessment V2] Requesting signed upload URL...');
-                    const fileName = `sessions/${sessionId}/recording.webm`;
-                    const urlRes = await fetch('/api/archive/upload-url', {
-                        method: 'POST',
-                        body: JSON.stringify({ fileName, contentType: 'video/webm' }),
-                    });
-
-                    if (!urlRes.ok) throw new Error('Failed to get upload URL');
-                    const { url } = await urlRes.json();
-
-                    console.log('[Assessment V2] Uploading video directly to Firebase...');
-                    const uploadRes = await fetch(url, {
-                        method: 'PUT',
-                        body: recordingBlob,
-                        headers: { 'Content-Type': 'video/webm' }
-                    });
-
-                    if (!uploadRes.ok) throw new Error('Direct upload failed');
-                    recordingPath = fileName;
-                    console.log('[Assessment V2] Direct upload successful!');
-                } catch (uploadErr) {
-                    console.error('[Assessment V2] Video upload failed, proceeding with metadata only', uploadErr);
-                }
-            }
-
-            // 2. Send Metadata to Archive API
+            // 1. Archive Metadata (Fast)
             const formData = new FormData();
             formData.append('transcript', JSON.stringify(messages, null, 2));
             formData.append('report', fullReport);
-            formData.append('jobId', 'V2-TEST-ROLE');
+            formData.append('jobId', jobId);
             formData.append('sessionId', sessionId);
-            formData.append('timestamp', timestamp);
             formData.append('candidateName', candidateName);
-            formData.append('candidateEmail', 'v2-candidate@example.com');
-            if (recordingPath) {
-                formData.append('recordingPath', recordingPath);
+            formData.append('candidateEmail', candidateEmail);
+            formData.append('client', client);
+
+            // Mark as 'uploading' initially
+            console.log('[Assessment V2] Saving Metadata...');
+            await fetch('/api/archive', { method: 'POST', body: formData });
+
+            // 2. Upload Video (Aggressive Parallel)
+            if (recordingBlob) {
+                console.log(`[Assessment V2] Starting Multipart Upload. Size: ${(recordingBlob.size / 1024 / 1024).toFixed(2)} MB`);
+                try {
+                    // Check if Multipart is supported backend-side
+                    const checkRes = await fetch('/api/upload/multipart', { method: 'POST', body: JSON.stringify({ action: 'check' }) });
+                    const { enabled } = await checkRes.json();
+
+                    if (enabled) {
+                        const fileKey = await uploadMultipart(recordingBlob, `${sessionId}_interview.webm`, setUploadProgress);
+
+                        // Patch the record with video URL
+                        const patchData = new FormData();
+                        patchData.append('sessionId', sessionId);
+                        patchData.append('recordingPath', fileKey);
+                        await fetch('/api/archive', { method: 'POST', body: patchData });
+                    } else {
+                        throw new Error("Multipart disabled on server (Missing R2 Config)");
+                    }
+                } catch (e) {
+                    console.warn("Multipart failed, falling back to legacy upload", e);
+                    // Legacy XHR fallback...
+                    const legacyForm = new FormData();
+                    legacyForm.append('sessionId', sessionId);
+                    legacyForm.append('recording', recordingBlob, 'interview.webm');
+
+                    await new Promise((resolve, reject) => {
+                        const xhr = new XMLHttpRequest();
+                        xhr.open('POST', '/api/archive', true);
+                        xhr.upload.onprogress = (e) => {
+                            if (e.lengthComputable) setUploadProgress(Math.round((e.loaded / e.total) * 100));
+                        };
+                        xhr.onload = () => {
+                            if (xhr.status === 200) {
+                                resolve(xhr.response);
+                            } else {
+                                console.error("Legacy Upload Failed Status:", xhr.status, xhr.statusText, xhr.responseText);
+                                reject(new Error(`Server Error: ${xhr.status} ${xhr.statusText}`));
+                            }
+                        };
+                        xhr.onerror = () => reject(new Error("Network Error"));
+                        xhr.send(legacyForm);
+                    });
+                }
             }
 
-            console.log('[Assessment V2] Archiving session metadata...');
-            const archiveRes = await fetch('/api/archive', {
-                method: 'POST',
-                body: formData,
-            });
-
-            if (archiveRes.ok) {
-                setCompleted(true);
-            } else {
-                setCompleted(true);
-            }
+            setCompleted(true);
         } catch (err) {
             console.error("Archive failed", err);
             setCompleted(true);
@@ -101,9 +300,11 @@ export default function AssessmentV2Page() {
             const formData = new FormData();
             formData.append('transcript', JSON.stringify(transcript, null, 2));
             formData.append('report', fullReport);
-            formData.append('jobId', 'V2-TEST-ROLE');
+            formData.append('jobId', jobId);
             formData.append('sessionId', sessionId);
             formData.append('candidateName', candidateName);
+            formData.append('candidateEmail', candidateEmail);
+            formData.append('client', client); // Using contextual client
 
             fetch('/api/archive', {
                 method: 'POST',
@@ -119,7 +320,49 @@ export default function AssessmentV2Page() {
             <div className="min-h-screen bg-white flex flex-col items-center justify-center font-sans">
                 <Loader2 className="w-12 h-12 text-[#0095A9] animate-spin mb-6" />
                 <p className="text-xl text-slate-500 font-bold animate-pulse">Archiving Session Data...</p>
-                <p className="text-sm text-slate-400 mt-2">Uploading high-fidelity report and recording</p>
+                <div className="w-64 h-2 bg-slate-100 rounded-full mt-4 overflow-hidden">
+                    <div
+                        className="h-full bg-[#0095A9] transition-all duration-300 ease-out"
+                        style={{ width: `${uploadProgress}%` }}
+                    />
+                </div>
+                <p className="text-xs font-bold text-[#0095A9] mt-2">{uploadProgress}% Uploaded</p>
+                <p className="text-sm text-slate-400 mt-2">Please do not close this window.</p>
+            </div>
+        );
+    }
+
+    if (permissionDenied || isTerminated) {
+        return (
+            <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6 text-center animate-in fade-in zoom-in duration-500 font-sans">
+                <div className="w-24 h-24 bg-red-50 rounded-full flex items-center justify-center mb-8">
+                    <AlertCircle className="w-12 h-12 text-red-500" />
+                </div>
+                <h1 className="text-4xl md:text-5xl font-black text-[#003040] mb-6 tracking-tight">
+                    Session Terminated
+                </h1>
+                <p className="text-xl text-slate-500 max-w-lg mx-auto mb-12 leading-relaxed">
+                    {permissionDenied
+                        ? "Screen sharing permission was denied. Full monitor sharing is mandatory to ensure assessment integrity."
+                        : "A security protocol violation was detected. Your session has been automatically terminated for evaluation integrity."
+                    }
+                </p>
+                <div className="p-8 bg-red-50 rounded-[32px] border-2 border-red-100 max-w-md w-full shadow-lg shadow-red-500/5">
+                    <p className="text-xs font-black text-red-600 uppercase tracking-[0.2em] mb-3">Action Required</p>
+                    <p className="text-slate-700 font-bold mb-4">
+                        Please contact your Recruitment Coordinator or Delivery Manager to discuss next steps.
+                    </p>
+                    <div className="pt-4 border-t border-red-200/50 flex items-center justify-center gap-2">
+                        <div className="w-1.5 h-1.5 rounded-full bg-red-400"></div>
+                        <span className="text-[10px] font-bold text-red-400 uppercase tracking-widest">Incident Logged: {new Date().toLocaleTimeString()}</span>
+                    </div>
+                </div>
+                <button
+                    onClick={() => window.location.href = '/candidate/dashboard'}
+                    className="mt-12 text-sm font-bold text-slate-400 hover:text-[#0095A9] transition-colors uppercase tracking-widest flex items-center gap-2"
+                >
+                    Go to Candidate Dashboard <ArrowRight className="w-4 h-4" />
+                </button>
             </div>
         );
     }
@@ -137,7 +380,7 @@ export default function AssessmentV2Page() {
                 <div className="p-8 bg-slate-50 rounded-[32px] border border-slate-200 max-w-sm w-full">
                     <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Next Steps</p>
                     <p className="text-slate-600 font-medium">
-                        Your assessment is now being reviewed. Check with your Recruitment Coordinator for feedback.
+                        Your assessment is now being reviewed. Check with your Delivery Manager or Recruitment Coordinator for the feedback.
                     </p>
                 </div>
                 <p className="mt-12 text-xs text-slate-400">You may now safely close this window.</p>
@@ -146,7 +389,49 @@ export default function AssessmentV2Page() {
     }
 
 
+
+    // Show loading state while hydrating
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-white flex items-center justify-center">
+                <div className="text-center">
+                    <Loader2 className="w-8 h-8 text-[#0095A9] animate-spin mx-auto mb-4" />
+                    <p className="text-sm text-slate-400 font-medium">Loading assessment...</p>
+                </div>
+            </div>
+        );
+    }
+
+
+    // Check if assessment was already completed (prevent retakes)
+    if (alreadyCompleted) {
+        return (
+            <div className="min-h-screen bg-white flex items-center justify-center p-6">
+                <div className="max-w-md text-center">
+                    <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                        <XCircle className="w-10 h-10 text-red-600" />
+                    </div>
+                    <h1 className="text-3xl font-black text-slate-800 mb-4">
+                        Assessment Already Completed
+                    </h1>
+                    <p className="text-slate-600 mb-2">
+                        This assessment was completed on:
+                    </p>
+                    <p className="text-lg font-bold text-[#0095A9] mb-8">
+                        {completedAt ? new Date(completedAt).toLocaleString() : 'Unknown date'}
+                    </p>
+                    <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
+                        <p className="text-sm text-slate-600">
+                            You cannot retake this assessment. Please contact your recruiter if you believe this is an error.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     if (!started) {
+
         return (
             <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6 relative overflow-hidden font-sans">
                 {/* Background Decorations */}
@@ -160,7 +445,7 @@ export default function AssessmentV2Page() {
 
                     <h1 className="text-5xl md:text-6xl font-black text-[#003040] mb-6 tracking-tight">
                         Welcome, <br />
-                        <span className="text-[#0095A9]">{candidateName}</span>
+                        <span className="text-[#0095A9]">{candidateName || 'Candidate'}</span>
                     </h1>
 
                     <p className="text-xl text-slate-500 font-light mb-12 max-w-lg mx-auto leading-relaxed">
@@ -196,40 +481,7 @@ export default function AssessmentV2Page() {
         );
     }
 
-    if (permissionDenied || isTerminated) {
-        return (
-            <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6 text-center animate-in fade-in zoom-in duration-500 font-sans">
-                <div className="w-24 h-24 bg-red-50 rounded-full flex items-center justify-center mb-8">
-                    <AlertCircle className="w-12 h-12 text-red-500" />
-                </div>
-                <h1 className="text-4xl md:text-5xl font-black text-[#003040] mb-6 tracking-tight">
-                    Session Terminated
-                </h1>
-                <p className="text-xl text-slate-500 max-w-lg mx-auto mb-12 leading-relaxed">
-                    {permissionDenied
-                        ? "Screen sharing permission was denied. Full monitor sharing is mandatory to ensure assessment integrity."
-                        : "A security protocol violation was detected. Your session has been automatically terminated for evaluation integrity."
-                    }
-                </p>
-                <div className="p-8 bg-red-50 rounded-[32px] border-2 border-red-100 max-w-md w-full shadow-lg shadow-red-500/5">
-                    <p className="text-xs font-black text-red-600 uppercase tracking-[0.2em] mb-3">Action Required</p>
-                    <p className="text-slate-700 font-bold mb-4">
-                        Please contact your Recruitment Coordinator or Delivery Manager to discuss next steps.
-                    </p>
-                    <div className="pt-4 border-t border-red-200/50 flex items-center justify-center gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-red-400"></div>
-                        <span className="text-[10px] font-bold text-red-400 uppercase tracking-widest">Incident Logged: {new Date().toLocaleTimeString()}</span>
-                    </div>
-                </div>
-                <button
-                    onClick={() => window.location.reload()}
-                    className="mt-12 text-sm font-bold text-slate-400 hover:text-[#0095A9] transition-colors uppercase tracking-widest"
-                >
-                    Return to Welcome Screen
-                </button>
-            </div>
-        );
-    }
+
 
     if (started && !securitySetupComplete && !permissionDenied && !isTerminated) {
         return (
@@ -387,24 +639,56 @@ export default function AssessmentV2Page() {
                 disabled={!securitySetupComplete}
                 onViolation={(type, details) => {
                     console.warn(`[V2 Security] Violation: ${type} - ${details}`);
-                    // Mirror V1 logic: Trigger background checkpoint on violation
                     handleCheckpoint([], `\n> [!CAUTION]\n> **Security Violation Detected**: ${type}\n> Details: ${details}\n> Timestamp: ${new Date().toISOString()}\n`);
                 }}
-                onTerminate={() => {
+                onTerminate={async () => {
+                    console.log('[V2 Security] Termination triggered - saving recording...');
+
+                    // Force finish the interview to save the recording
+                    if (interviewRef.current?.finishInterview) {
+                        try {
+                            await interviewRef.current.finishInterview();
+                            console.log('[V2 Security] Recording saved successfully');
+                        } catch (error) {
+                            console.error('[V2 Security] Failed to save recording:', error);
+                        }
+                    }
+
+                    // Then mark as terminated
                     setIsTerminated(true);
                 }}
             >
-                <InterviewSessionV2
-                    ref={interviewRef}
-                    jobId="V2-TEST-ROLE"
-                    candidateName={candidateName}
-                    isTerminated={isTerminated}
-                    initialScreenStream={activeStream}
-                    onPermissionDenied={() => setPermissionDenied(true)}
-                    onFinish={handleFinish}
-                    onCheckpoint={handleCheckpoint}
-                    showConfig={false}
-                />
+                {loading ? (
+                    <div className="min-h-screen bg-white flex flex-col items-center justify-center">
+                        <Loader2 className="w-8 h-8 text-[#0095A9] animate-spin mb-4" />
+                        <p className="text-slate-500 font-bold animate-pulse">Loading Session...</p>
+                    </div>
+                ) : (
+                    <InterviewSessionV2
+                        ref={interviewRef}
+                        jobId={jobId}
+                        candidateName={candidateName}
+                        skills={skills}
+                        customInstructions={customInstructions}
+                        initialFlow={flow.length > 0 ? flow : undefined}
+                        isTerminated={isTerminated}
+                        initialScreenStream={activeStream}
+                        onPermissionDenied={async () => {
+                            // Ensure session is archived before showing error screen
+                            if (interviewRef.current) {
+                                try {
+                                    await interviewRef.current.finishInterview();
+                                } catch (e) {
+                                    console.error("Failed to archive on permission denied", e);
+                                }
+                            }
+                            setPermissionDenied(true);
+                        }}
+                        onFinish={handleFinish}
+                        onCheckpoint={handleCheckpoint}
+                        showConfig={false}
+                    />
+                )}
             </AssessmentShield>
         </div>
     );

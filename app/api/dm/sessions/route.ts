@@ -17,8 +17,8 @@ export async function GET(req: any) {
             .select('*')
             .order('created_at', { ascending: false });
 
-        // Server-side filtering: Skip filter if 'All' or 'Systems' (Global Admin)
-        if (client && client !== 'All' && client !== 'Systems') {
+        // Server-side filtering: Skip filter ONLY if 'All' is selected
+        if (client && client !== 'All') {
             query = query.eq('client', client);
         }
 
@@ -26,16 +26,37 @@ export async function GET(req: any) {
 
         if (error) throw error;
 
+        // Collect all jobIds to fetch titles
+        const jobIds = [...new Set((sessions || []).map((s: any) => s.job_id).filter(Boolean))];
+
+        // Fetch job titles map
+        let jobTitleMap: Record<string, string> = {};
+        if (jobIds.length > 0) {
+            const { data: jobs } = await supabaseAdmin
+                .from('job_roles')
+                .select('job_id, job_title')
+                .in('job_id', jobIds);
+
+            if (jobs) {
+                jobTitleMap = jobs.reduce((acc: any, job: any) => {
+                    acc[job.job_id] = job.job_title;
+                    return acc;
+                }, {});
+            }
+        }
+
         const formattedSessions = (sessions || []).map((session: any) => ({
             id: session.session_id,
             folderName: session.session_id,
             date: session.created_at,
             jobId: session.job_id,
+            jobTitle: jobTitleMap[session.job_id] || session.job_title || session.config?.jobTitle || session.job_id, // Hierarchy: Role DB -> Session DB -> Config -> Raw ID
             candidateName: session.candidate_name,
             candidateEmail: session.candidate_email,
-            client: session.client || 'Uber',
+            client: session.client || 'Systems',
             reportPreview: "Click to view full report...",
-            hasFinalFeedback: session.has_feedback || false
+            hasFinalFeedback: session.has_feedback || false,
+            recordingUrl: session.recording_url
         }));
 
         return NextResponse.json({ sessions: formattedSessions });

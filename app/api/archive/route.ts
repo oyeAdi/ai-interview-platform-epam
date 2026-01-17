@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { bucket } from '@/lib/firebase-admin';
+import { r2Client, R2_BUCKET_NAME } from '@/lib/r2';
+import { PutObjectCommand } from "@aws-sdk/client-s3";
 
 export async function POST(req: NextRequest) {
     if (!supabaseAdmin) {
@@ -21,6 +23,13 @@ export async function POST(req: NextRequest) {
         let sessionId = formData.get('sessionId') as string;
         if (!sessionId) {
             sessionId = `session_${jobId}_${timestamp}`;
+        }
+
+        console.log('[Archive API] Session ID:', sessionId);
+        console.log('[Archive API] Recording blob received:', !!recording);
+        if (recording) {
+            console.log('[Archive API] Recording size:', recording.size, 'bytes');
+            console.log('[Archive API] Recording type:', recording.type);
         }
 
         // Pre-determine URLs (since they are deterministic based on sessionId)
@@ -54,23 +63,53 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        // 3. Queue Recording Upload (to Firebase)
-        if (!recordingUrl && recording && bucket) {
-            const firebaseTask = (async () => {
-                const file = bucket.file(`sessions/${sessionId}/recording.webm`);
-                const buffer = Buffer.from(await recording.arrayBuffer());
-                await file.save(buffer, {
-                    metadata: { contentType: 'video/webm' },
-                    resumable: false
-                });
-                return file.name;
-            })();
-            tasks.push(firebaseTask.then(name => { recordingUrl = name; }));
+        // 3. Queue Recording Upload
+        if (!recordingUrl && recording) {
+            const provider = process.env.STORAGE_PROVIDER || 'FIREBASE';
+            const fileName = `sessions/${sessionId}/recording.webm`;
+            const buffer = Buffer.from(await recording.arrayBuffer());
+
+            console.log('[Archive API] Uploading recording to', provider);
+            console.log('[Archive API] Recording buffer size:', buffer.length);
+
+            if (provider === 'R2') {
+                console.log('[Archive API] Uploading to R2:', fileName);
+                tasks.push(
+                    r2Client.send(new PutObjectCommand({
+                        Bucket: R2_BUCKET_NAME,
+                        Key: fileName,
+                        Body: buffer,
+                        ContentType: 'video/webm',
+                    })).then(() => {
+                        console.log('[Archive API] R2 upload successful');
+                        return { success: true };
+                    }).catch((err: any) => {
+                        console.error('[Archive API] R2 upload failed:', err);
+                        throw err;
+                    })
+                );
+            } else if (provider === 'SUPABASE') {
+                tasks.push(
+                    supabaseAdmin.storage
+                        .from('recordings')
+                        .upload(fileName, buffer, { contentType: 'video/webm', upsert: true })
+                );
+            } else if (bucket) {
+                tasks.push((async () => {
+                    const file = bucket.file(fileName);
+                    await file.save(buffer, { metadata: { contentType: 'video/webm' }, resumable: false });
+                    return { success: true };
+                })());
+            }
+            recordingUrl = fileName;
+        } else {
+            console.log('[Archive API] Skipping recording upload. recordingUrl:', recordingUrl, 'recording:', !!recording);
         }
 
+        const client = formData.get('client') as string || 'Systems';
+
         // 4. Queue Database Upsert
-        // We can run this in parallel because we already know what the URLs WILL be
-        const dbTask = supabaseAdmin
+        const { error: dbError } = await supabaseAdmin
             .from('assessment_sessions')
             .upsert({
                 session_id: sessionId,
@@ -80,21 +119,26 @@ export async function POST(req: NextRequest) {
                 transcript_url: transcriptPath,
                 report_url: reportPath,
                 recording_url: recordingUrl || (recording ? `sessions/${sessionId}/recording.webm` : ''),
+                client: client,
+                completed_at: new Date().toISOString(), // CRITICAL: Mark as completed for retake prevention
                 updated_at: new Date().toISOString()
             }, {
                 onConflict: 'session_id'
             });
 
-        tasks.push(dbTask);
+        if (dbError) {
+            console.error('[Archive API] Database upsert failed:', dbError);
+            throw dbError;
+        }
 
-        // Execute all tasks in parallel
-        console.log(`[Archive API] Executing ${tasks.length} tasks in parallel for session: ${sessionId}`);
-        const results = await Promise.all(tasks);
+        // Execute all remaining parallel tasks (uploads)
+        console.log(`[Archive API] Executing ${tasks.length} upload tasks in parallel for session: ${sessionId}`);
+        const uploadResults = await Promise.all(tasks);
 
-        // Check for errors in the results
-        for (const res of results) {
+        // Check for errors in the upload results
+        for (const res of uploadResults) {
             if (res && typeof res === 'object' && res.error) {
-                console.error('[Archive API] Task failed:', res.error);
+                console.error('[Archive API] Upload task failed:', res.error);
                 throw res.error;
             }
         }
